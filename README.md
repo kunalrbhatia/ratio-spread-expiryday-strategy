@@ -63,6 +63,7 @@ pm2 start ecosystem.config.cjs
 Control and inspect the strategy via Telegram Bot commands:
 * `/status` — Displays current position detail, margin, SL level, live LTPs, and net trade P&L.
 * `/paper [on|off]` — Toggles paper trading mode.
+* `/kill [on|off]` — Toggles emergency kill switch (pauses all entry, exit, and monitoring activity).
 * `/update` — Forces manual download and cache update of the option scrip master list.
 * `/logs` — Returns the last 20 lines of the daily log.
 

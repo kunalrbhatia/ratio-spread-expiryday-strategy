@@ -16,3 +16,19 @@ export const setPaperMode = (on: boolean): void => {
     }
   }
 };
+
+const killFilePath = path.join(process.cwd(), '.kill');
+
+export const isKillSwitchActive = (): boolean => {
+  return fs.existsSync(killFilePath);
+};
+
+export const setKillSwitch = (on: boolean): void => {
+  if (on) {
+    fs.writeFileSync(killFilePath, 'KILL', 'utf-8');
+  } else {
+    if (fs.existsSync(killFilePath)) {
+      fs.unlinkSync(killFilePath);
+    }
+  }
+};
