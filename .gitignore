@@ -40,3 +40,4 @@ data/positions.json
 *.sln
 *.sw?
 .DS_Store
+settings.json
