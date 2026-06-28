@@ -1,0 +1,28 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Deploy to Oracle Cloud via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            export PATH=$PATH:/home/ubuntu/.nvm/versions/node/v24.16.0/bin
+            cd ~/nifty-supertrend
+            git pull origin master
+            pnpm install --frozen-lockfile
+            pnpm build
+            pm2 restart ecosystem.config.cjs --env production
