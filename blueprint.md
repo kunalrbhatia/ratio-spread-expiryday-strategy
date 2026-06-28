@@ -75,6 +75,7 @@ Immediately after entry, execute the sell-side hedges:
 | Logging | Winston (daily files, IST timestamps, `Asia/Kolkata`) |
 | Persistence | Local JSON files (`data/positions.json`, `data/config.json`) |
 | State Management | `.paper` file (exists = Paper Mode, deleted = Live Mode) |
+| Kill Switch | `.kill` file (exists = Algo Paused, deleted = Algo Running) |
 | Testing | Jest + ts-jest, 100% coverage enforced |
 | Linting | ESLint + Prettier |
 | Pre-commit | Husky + lint-staged |
@@ -203,5 +204,5 @@ Before finalising any commit, check if changes affect strategy, env, commands, o
 - Testing: 100% coverage enforced for all modules.
 - Timezone: All timestamps must use Asia/Kolkata.
 - Config: No process.env outside `src/config/env.ts`.
-- State: Positions in `data/positions.json`, config in `data/config.json`, paper mode via `.paper` file.
+- State: Positions in `data/positions.json`, config in `data/config.json`, paper mode via `.paper` file, kill switch via `.kill` file.
 ```

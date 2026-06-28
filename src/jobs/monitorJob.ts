@@ -3,10 +3,16 @@ import { ordersHelper } from '../helpers/orders.js';
 import { smartStream, TickData } from '../helpers/websocket.js';
 import { notifierHelper } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
+import { isKillSwitchActive } from '../helpers/modeManager.js';
 
 let isExiting = false;
 
 export const exitAllPositions = async (reason: string): Promise<boolean> => {
+  if (isKillSwitchActive()) {
+    logger.warn(`Exit all positions blocked: Kill Switch is active. (Reason: ${reason})`);
+    return false;
+  }
+
   if (isExiting) return false;
   isExiting = true;
 
@@ -79,6 +85,10 @@ export const calculateCurrentPnL = (legs: OptionLeg[]): number => {
 };
 
 export const handleIncomingTick = async (tick: TickData) => {
+  if (isKillSwitchActive()) {
+    return;
+  }
+
   const positions = positionStore.getPositions();
   if (!positions.active || positions.legs.length === 0) {
     return;
@@ -109,6 +119,11 @@ export const handleIncomingTick = async (tick: TickData) => {
 };
 
 export const startContinuousMonitoring = () => {
+  if (isKillSwitchActive()) {
+    logger.warn('Skipping continuous monitoring startup: Kill Switch is active.');
+    return;
+  }
+
   const positions = positionStore.getPositions();
   if (!positions.active || positions.legs.length === 0) {
     logger.info('No active positions. Skipping WebSocket stream monitoring.');

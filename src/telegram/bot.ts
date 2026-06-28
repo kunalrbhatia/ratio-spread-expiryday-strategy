@@ -2,7 +2,12 @@ import { Telegraf } from 'telegraf';
 import fs from 'fs';
 import path from 'path';
 import { env } from '../config/env.js';
-import { isPaperMode, setPaperMode } from '../helpers/modeManager.js';
+import {
+  isPaperMode,
+  setPaperMode,
+  isKillSwitchActive,
+  setKillSwitch,
+} from '../helpers/modeManager.js';
 import { positionStore } from '../store/positionStore.js';
 import { calculateCurrentPnL } from '../jobs/monitorJob.js';
 import { downloadAndCacheScripMaster } from '../helpers/scripMaster.js';
@@ -78,6 +83,27 @@ export const startTelegramBot = () => {
       }
       const isPaper = isPaperMode();
       ctx.reply(`Trading Mode: ${isPaper ? '🧪 PAPER' : '⚡ LIVE'}`);
+    });
+
+    // Command: /kill
+    telegramBot.command('kill', (ctx) => {
+      const args = ctx.message.text.split(' ');
+      if (args.length > 1) {
+        const setting = args[1].toLowerCase();
+        if (setting === 'on' || setting === 'true') {
+          setKillSwitch(true);
+        } else if (setting === 'off' || setting === 'false') {
+          setKillSwitch(false);
+        }
+      } else {
+        // Toggle if no arguments are provided
+        const active = isKillSwitchActive();
+        setKillSwitch(!active);
+      }
+      const isKilled = isKillSwitchActive();
+      ctx.reply(
+        `Kill Switch: ${isKilled ? '🚨 ACTIVE (Algo is PAUSED)' : '🟢 INACTIVE (Algo is RUNNING)'}`,
+      );
     });
 
     // Command: /update

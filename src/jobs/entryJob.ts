@@ -10,8 +10,14 @@ import { positionStore, OptionLeg } from '../store/positionStore.js';
 import { sendAlert } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
 import { CONSTANTS } from '../helpers/constants.js';
+import { isKillSwitchActive } from '../helpers/modeManager.js';
 
 export const executeExpiryStrategyEntry = async (): Promise<boolean> => {
+  if (isKillSwitchActive()) {
+    logger.warn('Strategy entry blocked: Kill Switch is active.');
+    return false;
+  }
+
   try {
     logger.info('--- Starting Expiry Strategy Entry Job (09:20 AM) ---');
 

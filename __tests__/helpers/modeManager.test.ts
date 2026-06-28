@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { isPaperMode, setPaperMode } from '../../src/helpers/modeManager.js';
+import { isPaperMode, setPaperMode, isKillSwitchActive, setKillSwitch } from '../../src/helpers/modeManager.js';
 import fs from 'fs';
 
 describe('modeManager helper', () => {
@@ -33,6 +33,23 @@ describe('modeManager helper', () => {
 
     existsSpy.mockReturnValueOnce(true);
     setPaperMode(false);
+    expect(unlinkSpy).toHaveBeenCalled();
+  });
+
+  it('should return correct kill switch active state based on file existence', () => {
+    existsSpy.mockReturnValueOnce(true);
+    expect(isKillSwitchActive()).toBe(true);
+
+    existsSpy.mockReturnValueOnce(false);
+    expect(isKillSwitchActive()).toBe(false);
+  });
+
+  it('should write/unlink kill file correctly', () => {
+    setKillSwitch(true);
+    expect(writeSpy).toHaveBeenCalled();
+
+    existsSpy.mockReturnValueOnce(true);
+    setKillSwitch(false);
     expect(unlinkSpy).toHaveBeenCalled();
   });
 });
