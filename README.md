@@ -65,3 +65,16 @@ Control and inspect the strategy via Telegram Bot commands:
 * `/paper [on|off]` — Toggles paper trading mode.
 * `/update` — Forces manual download and cache update of the option scrip master list.
 * `/logs` — Returns the last 20 lines of the daily log.
+
+---
+
+## Testing & CI/CD
+
+Run format, lint, and test validation checks locally:
+```bash
+pnpm verify
+```
+
+The repository is configured with GitHub Actions:
+- **CI**: Triggers on PR/push to verify type safety, styling, lint rules, test coverage, and PR description formatting.
+- **Deploy**: Runs automatically after a successful CI pass on `master` branch to deploy the built strategy onto Oracle Cloud.
