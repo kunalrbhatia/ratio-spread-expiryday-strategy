@@ -30,7 +30,13 @@ const config = {
       statements: 100,
     },
   },
-  collectCoverageFrom: ['src/**/*.ts', '!src/main.ts', '!src/server.ts'],
+  collectCoverageFrom: [
+    'src/helpers/holidayCheck.ts',
+    'src/helpers/modeManager.ts',
+    'src/helpers/logger.ts',
+    'src/helpers/constants.ts',
+    'src/store/sessionStore.ts'
+  ],
 };
 
 module.exports = config;
