@@ -16,7 +16,7 @@ export const loginToSmartAPI = async (): Promise<boolean> => {
 
     const response = await apiRequest({
       method: 'POST',
-      url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/auth/angelone/vas/v1/loginRule`,
+      url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword`,
       data: {
         clientcode: env.CLIENT_CODE,
         password: env.CLIENT_PIN,
