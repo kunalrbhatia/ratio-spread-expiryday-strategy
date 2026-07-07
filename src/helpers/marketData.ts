@@ -7,16 +7,17 @@ export const getNiftySpotLtp = async (): Promise<number> => {
   try {
     const response = await apiRequest({
       method: 'POST',
-      url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/secure/angelbroking/order/v1/getLastPointPrice`,
+      url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/secure/angelbroking/market/v1/quote`,
       data: {
-        exchange: 'NSE',
-        tradingsymbol: 'NIFTY',
-        symboltoken: CONSTANTS.NIFTY_SPOT_TOKEN,
+        mode: 'LTP',
+        exchangeTokens: {
+          NSE: [CONSTANTS.NIFTY_SPOT_TOKEN],
+        },
       },
     });
 
-    if (response.status === true && response.data) {
-      const ltp = parseFloat(response.data.ltp);
+    if (response.status === true && response.data && response.data.fetched && response.data.fetched.length > 0) {
+      const ltp = parseFloat(response.data.fetched[0].ltp);
       logger.info(`Nifty 50 Spot LTP: ${ltp}`);
       return ltp;
     }

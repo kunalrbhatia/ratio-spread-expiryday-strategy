@@ -1,0 +1,4 @@
+# Snapshot data (auto-generated)
+analysis/snapshots/
+analysis/reports/
+*.jsonl
