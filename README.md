@@ -5,6 +5,7 @@ An automated weekly options trading strategy for Nifty 50 options. The strategy 
 ## Strategy Logic
 
 ### 1. Entry (09:20 AM IST)
+* Spot LTP is retrieved using the modern Angel One quote API (`/rest/secure/angelbroking/market/v1/quote`).
 * Buy **1 Lot** of ATM Call (CE) option.
 * Buy **1 Lot** of ATM Put (PE) option.
 * Record the exact premium paid for each: $P_{CE\_Buy}$ and $P_{PE\_Buy}$.
@@ -17,7 +18,7 @@ Immediately after entry, execute:
 ### 3. Position Management
 * Retreive utilized margin block from Angel One.
 * Set Stop-Loss at **1% of entry margin**.
-* Stream option prices in real-time over WebSocket. If combined loss hits 1% of margin at any point, exit all positions immediately.
+* Stream option prices in real-time over the updated Angel One SmartStream WebSocket protocol (`wss://smartapisocket.angelone.in/smart-stream`). If combined loss hits 1% of margin at any point, exit all positions immediately.
 * If SL is not hit, hold and square off at **03:30 PM IST** (market close).
 
 ---
