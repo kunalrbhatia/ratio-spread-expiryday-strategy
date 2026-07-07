@@ -16,7 +16,12 @@ export const getNiftySpotLtp = async (): Promise<number> => {
       },
     });
 
-    if (response.status === true && response.data && response.data.fetched && response.data.fetched.length > 0) {
+    if (
+      response.status === true &&
+      response.data &&
+      response.data.fetched &&
+      response.data.fetched.length > 0
+    ) {
       const ltp = parseFloat(response.data.fetched[0].ltp);
       logger.info(`Nifty 50 Spot LTP: ${ltp}`);
       return ltp;
