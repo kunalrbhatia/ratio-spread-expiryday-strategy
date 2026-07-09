@@ -3,7 +3,10 @@ import { CONSTANTS } from './constants.js';
 import { getCachedScrips, ScripItem } from './scripMaster.js';
 import { logger } from './logger.js';
 
-export const getNiftySpotLtp = async (): Promise<number> => {
+import { INDEX_CONFIGS } from './constants.js';
+
+export const getSpotLtp = async (symbol: 'NIFTY' | 'SENSEX'): Promise<number> => {
+  const config = INDEX_CONFIGS[symbol];
   try {
     const response = await apiRequest({
       method: 'POST',
@@ -11,7 +14,7 @@ export const getNiftySpotLtp = async (): Promise<number> => {
       data: {
         mode: 'LTP',
         exchangeTokens: {
-          NSE: [CONSTANTS.NIFTY_SPOT_TOKEN],
+          [config.exchange]: [config.spotToken],
         },
       },
     });
@@ -23,22 +26,29 @@ export const getNiftySpotLtp = async (): Promise<number> => {
       response.data.fetched.length > 0
     ) {
       const ltp = parseFloat(response.data.fetched[0].ltp);
-      logger.info(`Nifty 50 Spot LTP: ${ltp}`);
+      logger.info(`${symbol} Spot LTP: ${ltp}`);
       return ltp;
     }
-    throw new Error(response.message || 'Failed to fetch Nifty Spot LTP');
+    throw new Error(response.message || `Failed to fetch ${symbol} Spot LTP`);
   } catch (error: any) {
-    logger.error(`Error in getNiftySpotLtp: ${error.message}`);
+    logger.error(`Error in getSpotLtp for ${symbol}: ${error.message}`);
     throw error;
   }
 };
 
-export const getATMStrike = (spot: number): number => {
-  return Math.round(spot / 50) * 50;
+export const getNiftySpotLtp = async (): Promise<number> => {
+  return getSpotLtp('NIFTY');
 };
 
-export const findATMContracts = (atmStrike: number): { ce: ScripItem; pe: ScripItem } => {
-  const scrips = getCachedScrips();
+export const getATMStrike = (spot: number, strikeStep: number = 50): number => {
+  return Math.round(spot / strikeStep) * strikeStep;
+};
+
+export const findATMContracts = (
+  symbol: 'NIFTY' | 'SENSEX',
+  atmStrike: number,
+): { ce: ScripItem; pe: ScripItem } => {
+  const scrips = getCachedScrips(symbol);
 
   let ce: ScripItem | null = null;
   let pe: ScripItem | null = null;
@@ -57,14 +67,18 @@ export const findATMContracts = (atmStrike: number): { ce: ScripItem; pe: ScripI
 
   if (!ce || !pe) {
     throw new Error(
-      `Could not find CE or PE ATM contracts for strike ${atmStrike} in cached scrips`,
+      `Could not find CE or PE ATM contracts for strike ${atmStrike} in cached ${symbol} scrips`,
     );
   }
 
   return { ce, pe };
 };
 
-export const getOptionLtps = async (tokens: string[]): Promise<Map<string, number>> => {
+export const getOptionLtps = async (
+  tokens: string[],
+  symbol: 'NIFTY' | 'SENSEX' = 'NIFTY',
+): Promise<Map<string, number>> => {
+  const config = INDEX_CONFIGS[symbol];
   try {
     const response = await apiRequest({
       method: 'POST',
@@ -72,7 +86,7 @@ export const getOptionLtps = async (tokens: string[]): Promise<Map<string, numbe
       data: {
         mode: 'LTP',
         exchangeTokens: {
-          NFO: tokens,
+          [config.optionExchange]: tokens,
         },
       },
     });
@@ -85,18 +99,19 @@ export const getOptionLtps = async (tokens: string[]): Promise<Map<string, numbe
     }
     return ltpMap;
   } catch (error: any) {
-    logger.error(`Error in getOptionLtps: ${error.message}`);
+    logger.error(`Error in getOptionLtps for ${symbol}: ${error.message}`);
     throw error;
   }
 };
 
 export const findClosestPremiumStrike = async (
+  symbol: 'NIFTY' | 'SENSEX',
   type: 'CE' | 'PE',
   targetPremium: number,
 ): Promise<{ contract: ScripItem; premium: number }> => {
-  const scrips = getCachedScrips().filter((s) => s.symbol.endsWith(type));
+  const scrips = getCachedScrips(symbol).filter((s) => s.symbol.endsWith(type));
   if (scrips.length === 0) {
-    throw new Error(`No ${type} contracts found in scrip-master.json`);
+    throw new Error(`No ${type} contracts found in scrip-master-${symbol.toLowerCase()}.json`);
   }
 
   // Fetch LTPs for all contracts in batches of 50 to avoid payload limits
@@ -106,7 +121,7 @@ export const findClosestPremiumStrike = async (
   const batchSize = 45; // safe margin
   for (let i = 0; i < tokens.length; i += batchSize) {
     const batch = tokens.slice(i, i + batchSize);
-    const batchLtps = await getOptionLtps(batch);
+    const batchLtps = await getOptionLtps(batch, symbol);
     for (const [token, ltp] of batchLtps.entries()) {
       ltpMap.set(token, ltp);
     }

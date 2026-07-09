@@ -20,7 +20,7 @@ export interface PositionState {
 }
 
 class PositionStore {
-  private filePath = path.join(process.cwd(), 'data', 'positions.json');
+  private filePath: string;
   private state: PositionState = {
     active: false,
     legs: [],
@@ -28,7 +28,8 @@ class PositionStore {
     stopLoss: 0,
   };
 
-  constructor() {
+  constructor(private symbol: 'NIFTY' | 'SENSEX') {
+    this.filePath = path.join(process.cwd(), 'data', `${symbol.toLowerCase()}_positions.json`);
     this.load();
   }
 
@@ -45,7 +46,7 @@ class PositionStore {
         this.save();
       }
     } catch (error: any) {
-      logger.error(`Failed to load positions: ${error.message}`);
+      logger.error(`Failed to load ${this.symbol} positions: ${error.message}`);
     }
   }
 
@@ -57,7 +58,7 @@ class PositionStore {
       }
       fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2), 'utf-8');
     } catch (error: any) {
-      logger.error(`Failed to save positions: ${error.message}`);
+      logger.error(`Failed to save ${this.symbol} positions: ${error.message}`);
     }
   }
 
@@ -75,6 +76,14 @@ class PositionStore {
     this.save();
   }
 
+  public updateLegPrice(token: string, price: number) {
+    for (const leg of this.state.legs) {
+      if (leg.token === token) {
+        leg.currentPrice = price;
+      }
+    }
+  }
+
   public clear() {
     this.state = {
       active: false,
@@ -86,4 +95,10 @@ class PositionStore {
   }
 }
 
-export const positionStore = new PositionStore();
+export const positionStores: Record<'NIFTY' | 'SENSEX', PositionStore> = {
+  NIFTY: new PositionStore('NIFTY'),
+  SENSEX: new PositionStore('SENSEX'),
+};
+
+export const positionStore = positionStores.NIFTY;
+export { PositionStore };

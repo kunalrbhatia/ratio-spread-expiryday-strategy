@@ -1,18 +1,23 @@
 import express from 'express';
 import { env } from './config/env.js';
 import { logger } from './helpers/logger.js';
-import { positionStore } from './store/positionStore.js';
+import { positionStores } from './store/positionStore.js';
 import { isPaperMode } from './helpers/modeManager.js';
 import { Server } from 'http';
 
 const app = express();
 
 app.get('/health', (req, res) => {
-  const positions = positionStore.getPositions();
+  const niftyPositions = positionStores.NIFTY.getPositions();
+  const sensexPositions = positionStores.SENSEX.getPositions();
   res.json({
     status: 'UP',
     mode: isPaperMode() ? 'PAPER' : 'LIVE',
-    activeTrade: positions.active,
+    activeTrade: niftyPositions.active || sensexPositions.active,
+    activeTrades: {
+      NIFTY: niftyPositions.active,
+      SENSEX: sensexPositions.active,
+    },
     timestamp: new Date().toISOString(),
   });
 });
