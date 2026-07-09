@@ -1,39 +1,61 @@
-import { positionStore, OptionLeg } from '../store/positionStore.js';
+import { positionStores, OptionLeg } from '../store/positionStore.js';
 import { ordersHelper } from '../helpers/orders.js';
 import { smartStream, TickData } from '../helpers/websocket.js';
 import { notifierHelper } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
+import { INDEX_CONFIGS } from '../helpers/constants.js';
 import { isKillSwitchActive } from '../helpers/modeManager.js';
 
-let isExiting = false;
+const isExiting: Record<'NIFTY' | 'SENSEX', boolean> = {
+  NIFTY: false,
+  SENSEX: false,
+};
 
-export const exitAllPositions = async (reason: string): Promise<boolean> => {
+export const exitAllPositions = async (
+  symbolOrReason: 'NIFTY' | 'SENSEX' | string,
+  maybeReason?: string,
+): Promise<boolean> => {
+  let symbol: 'NIFTY' | 'SENSEX' = 'NIFTY';
+  let reason = symbolOrReason;
+
+  if (symbolOrReason === 'NIFTY' || symbolOrReason === 'SENSEX') {
+    symbol = symbolOrReason;
+    reason = maybeReason || '';
+  } else {
+    symbol = 'NIFTY';
+    reason = symbolOrReason;
+  }
+
   if (isKillSwitchActive()) {
-    logger.warn(`Exit all positions blocked: Kill Switch is active. (Reason: ${reason})`);
+    logger.warn(
+      `Exit all positions blocked for ${symbol}: Kill Switch is active. (Reason: ${reason})`,
+    );
     return false;
   }
 
-  if (isExiting) return false;
-  isExiting = true;
+  if (isExiting[symbol]) return false;
+  isExiting[symbol] = true;
 
   try {
-    logger.info(`Initiating Exit for all positions. Reason: ${reason}`);
+    logger.info(`Initiating Exit for all ${symbol} positions. Reason: ${reason}`);
 
-    // Disconnect websocket first to avoid processing incoming ticks
-    smartStream.disconnect();
-
-    const positions = positionStore.getPositions();
+    const store = positionStores[symbol];
+    const positions = store.getPositions();
     if (!positions.active || positions.legs.length === 0) {
-      logger.warn('No active positions to exit.');
-      isExiting = false;
+      logger.warn(`No active ${symbol} positions to exit.`);
+      isExiting[symbol] = false;
       return false;
     }
 
+    const tokens = positions.legs.map((leg) => leg.token);
+
+    // Unsubscribe from websocket for this index's tokens
+    smartStream.unsubscribe(tokens, symbol);
+
+    const config = INDEX_CONFIGS[symbol];
+
     // Execute exit orders for each leg
     for (const leg of positions.legs) {
-      // Exit order parameters:
-      // If we bought (BUY) it, we must SELL it to close.
-      // If we sold (SELL) it, we must BUY it to close.
       const exitTxType = leg.direction === 'BUY' ? 'SELL' : 'BUY';
       try {
         await ordersHelper.placeOptionOrder({
@@ -41,6 +63,7 @@ export const exitAllPositions = async (reason: string): Promise<boolean> => {
           symboltoken: leg.token,
           transactiontype: exitTxType,
           quantity: leg.qty,
+          exchange: config.optionExchange,
         });
       } catch (err: any) {
         logger.error(`Error closing leg ${leg.symbol}: ${err.message}`);
@@ -51,22 +74,24 @@ export const exitAllPositions = async (reason: string): Promise<boolean> => {
     const finalPnL = calculateCurrentPnL(positions.legs);
 
     // Clear state
-    positionStore.clear();
+    store.clear();
 
     const alertMessage = `
-🚨 <b>Position Exit Triggered</b>
+🚨 <b>${symbol} Position Exit Triggered</b>
 ---------------------------------
 <b>Reason:</b> ${reason}
 <b>Final Trade P&L:</b> ₹${finalPnL.toLocaleString(undefined, { minimumFractionDigits: 2 })}
 `;
 
     await notifierHelper.sendAlert(alertMessage);
-    isExiting = false;
+    isExiting[symbol] = false;
     return true;
   } catch (error: any) {
-    logger.error(`Failed to exit all positions: ${error.message}`);
-    await notifierHelper.sendAlert(`⚠️ <b>Emergency Exit Failed!</b>\nError: ${error.message}`);
-    isExiting = false;
+    logger.error(`Failed to exit all ${symbol} positions: ${error.message}`);
+    await notifierHelper.sendAlert(
+      `⚠️ <b>Emergency Exit Failed for ${symbol}!</b>\nError: ${error.message}`,
+    );
+    isExiting[symbol] = false;
     return false;
   }
 };
@@ -84,55 +109,83 @@ export const calculateCurrentPnL = (legs: OptionLeg[]): number => {
   return totalPnL;
 };
 
-export const handleIncomingTick = async (tick: TickData) => {
+export const handleIncomingTick = async (
+  symbolOrTick: 'NIFTY' | 'SENSEX' | TickData,
+  maybeTick?: TickData,
+) => {
   if (isKillSwitchActive()) {
     return;
   }
 
-  const positions = positionStore.getPositions();
+  let symbol: 'NIFTY' | 'SENSEX' = 'NIFTY';
+  let tick: TickData;
+
+  if (symbolOrTick === 'NIFTY' || symbolOrTick === 'SENSEX') {
+    symbol = symbolOrTick;
+    tick = maybeTick!;
+  } else {
+    symbol = 'NIFTY';
+    tick = symbolOrTick;
+  }
+
+  const store = positionStores[symbol];
+  const positions = store.getPositions();
   if (!positions.active || positions.legs.length === 0) {
     return;
   }
 
-  // Update leg current price
+  // Update leg current price in memory
   let legFound = false;
   for (const leg of positions.legs) {
     if (leg.token === tick.token) {
       leg.currentPrice = tick.ltp;
       legFound = true;
+      // Mutate private state inside the store directly
+      store.updateLegPrice(tick.token, tick.ltp);
     }
   }
 
   if (!legFound) return;
 
-  // Calculate current P&L
+  // Calculate current P&L using the updated legs
   const currentPnL = calculateCurrentPnL(positions.legs);
 
-  // Stop Loss is 1% of entry margin (SL is positive value representing absolute loss threshold)
-  // E.g. if SL is ₹3500, we trigger exit if P&L <= -3500
+  // Stop Loss is 1% of entry margin
   if (currentPnL <= -positions.stopLoss) {
     logger.warn(
-      `Stop loss hit! Current P&L: ₹${currentPnL} <= SL threshold: -₹${positions.stopLoss}`,
+      `[${symbol}] Stop loss hit! Current P&L: ₹${currentPnL} <= SL threshold: -₹${positions.stopLoss}`,
     );
-    await exitAllPositions(`Stop Loss hit of 1% (P&L: ₹${currentPnL.toFixed(2)})`);
+    await exitAllPositions(symbol, `Stop Loss hit of 1% (P&L: ₹${currentPnL.toFixed(2)})`);
   }
 };
 
-export const startContinuousMonitoring = () => {
+// Route incoming ticks to NIFTY or SENSEX depending on active positions
+export const routeTick = (tick: TickData) => {
+  for (const symbol of ['NIFTY', 'SENSEX'] as const) {
+    const store = positionStores[symbol];
+    const positions = store.getPositions();
+    if (positions.active && positions.legs.some((leg) => leg.token === tick.token)) {
+      handleIncomingTick(symbol, tick);
+    }
+  }
+};
+
+export const startContinuousMonitoring = (symbol: 'NIFTY' | 'SENSEX' = 'NIFTY') => {
   if (isKillSwitchActive()) {
-    logger.warn('Skipping continuous monitoring startup: Kill Switch is active.');
+    logger.warn(`Skipping continuous monitoring startup for ${symbol}: Kill Switch is active.`);
     return;
   }
 
-  const positions = positionStore.getPositions();
+  const store = positionStores[symbol];
+  const positions = store.getPositions();
   if (!positions.active || positions.legs.length === 0) {
-    logger.info('No active positions. Skipping WebSocket stream monitoring.');
+    logger.info(`No active positions for ${symbol}. Skipping WebSocket stream monitoring.`);
     return;
   }
 
-  logger.info('Starting SmartStream WebSocket monitoring for options legs...');
+  logger.info(`Starting SmartStream WebSocket monitoring for ${symbol} options legs...`);
   const tokens = positions.legs.map((leg) => leg.token);
 
-  smartStream.connect(handleIncomingTick);
-  smartStream.subscribe(tokens);
+  smartStream.connect(routeTick);
+  smartStream.subscribe(tokens, symbol);
 };

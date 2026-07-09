@@ -78,5 +78,32 @@ pnpm verify
 ```
 
 The repository is configured with GitHub Actions:
-- **CI**: Triggers on PR/push to verify type safety, styling, lint rules, test coverage, and PR description formatting.
+- **CI**: Triggers on PR/push to verify type safety, styling, lint rules, test coverage, PR description, and README accuracy.
 - **Deploy**: Runs automatically after a successful CI pass on `master` branch to deploy the built strategy onto Oracle Cloud.
+
+## Known SmartAPI Fixes
+
+The following endpoint patches are applied in `src/helpers/`:
+
+| Issue | Fix | Files |
+|-------|-----|-------|
+| `getLastPointPrice` returns HTML rejection | Use `/market/v1/quote` endpoint instead | `marketData.ts` |
+| WebSocket URL `smartapisec.angelone.in` has no DNS | Use `smartapisocket.angelone.in/smart-stream` | `websocket.ts` |
+| WS auth: `Bearer` prefix rejected | Send raw JWT token in `Authorization` header | `websocket.ts` |
+| WS SSL cert validation | Set `rejectUnauthorized: false` | `websocket.ts` |
+
+## Post-Expiry Analysis
+
+On each expiry day (Tuesday), the strategy runs an automated analysis pipeline:
+
+1. **Snapshot Collector** — every 15 min (9:15 AM–3:30 PM IST) captures P&L snapshots to `analysis/snapshots/`
+2. **Post-Close Report** — at 3:35 PM IST, generates a markdown report in `analysis/reports/` and opens a PR
+
+Reports include: entry/exit Nifty spot, leg-wise P&L, P&L timeline, and return metrics.
+
+## Development Rules
+
+- **No pushes to `master` during market hours** (9:15 AM – 3:30 PM IST) — triggers the deploy pipeline which resets PM2
+- **Always use branches + PRs** — never push directly to `master`
+- **Run `pnpm verify` before every push** — runs typecheck, lint, prettier, tests, and build
+- **Update `README.md`** when changing core application files (checked by CI)
