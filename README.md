@@ -77,6 +77,9 @@ Run format, lint, and test validation checks locally:
 pnpm verify
 ```
 
+Note: To support modern package managers like `pnpm` v11 and prevent deprecation warnings, all package lifecycle and script permissions are configured in `pnpm-workspace.yaml` instead of the legacy `pnpm` field in `package.json`.
+
+
 The repository is configured with GitHub Actions:
 - **CI**: Triggers on PR/push to verify type safety, styling, lint rules, test coverage, PR description, and README accuracy.
 - **Deploy**: Runs automatically after a successful CI pass on `master` branch to deploy the built strategy onto Oracle Cloud.
