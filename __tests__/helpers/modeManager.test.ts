@@ -1,5 +1,10 @@
 import { jest } from '@jest/globals';
-import { isPaperMode, setPaperMode, isKillSwitchActive, setKillSwitch } from '../../src/helpers/modeManager.js';
+import {
+  isPaperMode,
+  setPaperMode,
+  isKillSwitchActive,
+  setKillSwitch,
+} from '../../src/helpers/modeManager.js';
 import fs from 'fs';
 
 describe('modeManager helper', () => {

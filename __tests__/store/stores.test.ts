@@ -64,7 +64,14 @@ describe('Store Classes', () => {
   describe('positionStore', () => {
     it('should manage positions state', () => {
       const legs: OptionLeg[] = [
-        { symbol: 'NIFTY26FEB2625000CE', token: '35002', entryPremium: 100, qty: 65, type: 'CE', direction: 'BUY' }
+        {
+          symbol: 'NIFTY26FEB2625000CE',
+          token: '35002',
+          entryPremium: 100,
+          qty: 65,
+          type: 'CE',
+          direction: 'BUY',
+        },
       ];
       positionStore.setPositions(legs, 300000);
       const state = positionStore.getPositions();

@@ -1,5 +1,10 @@
 import { jest } from '@jest/globals';
-import { calculateCurrentPnL, handleIncomingTick, exitAllPositions, startContinuousMonitoring } from '../../src/jobs/monitorJob.js';
+import {
+  calculateCurrentPnL,
+  handleIncomingTick,
+  exitAllPositions,
+  startContinuousMonitoring,
+} from '../../src/jobs/monitorJob.js';
 import { positionStore, OptionLeg } from '../../src/store/positionStore.js';
 import { ordersHelper } from '../../src/helpers/orders.js';
 import { notifierHelper } from '../../src/notifier.js';
@@ -16,10 +21,42 @@ describe('monitorJob', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     legs = [
-      { symbol: 'CE_BUY', token: 'T1', entryPremium: 100, qty: 65, type: 'CE', direction: 'BUY', currentPrice: 110 },
-      { symbol: 'PE_BUY', token: 'T2', entryPremium: 80, qty: 65, type: 'PE', direction: 'BUY', currentPrice: 75 },
-      { symbol: 'CE_SELL', token: 'T3', entryPremium: 30, qty: 195, type: 'CE', direction: 'SELL', currentPrice: 25 },
-      { symbol: 'PE_SELL', token: 'T4', entryPremium: 25, qty: 195, type: 'PE', direction: 'SELL', currentPrice: 28 },
+      {
+        symbol: 'CE_BUY',
+        token: 'T1',
+        entryPremium: 100,
+        qty: 65,
+        type: 'CE',
+        direction: 'BUY',
+        currentPrice: 110,
+      },
+      {
+        symbol: 'PE_BUY',
+        token: 'T2',
+        entryPremium: 80,
+        qty: 65,
+        type: 'PE',
+        direction: 'BUY',
+        currentPrice: 75,
+      },
+      {
+        symbol: 'CE_SELL',
+        token: 'T3',
+        entryPremium: 30,
+        qty: 195,
+        type: 'CE',
+        direction: 'SELL',
+        currentPrice: 25,
+      },
+      {
+        symbol: 'PE_SELL',
+        token: 'T4',
+        entryPremium: 25,
+        qty: 195,
+        type: 'PE',
+        direction: 'SELL',
+        currentPrice: 28,
+      },
     ];
 
     placeOrderSpy = jest.spyOn(ordersHelper, 'placeOptionOrder').mockResolvedValue('MOCK-ORD-123');
@@ -44,7 +81,9 @@ describe('monitorJob', () => {
     });
 
     it('should use entryPremium as fallback if currentPrice is undefined', () => {
-      const legWithoutLtp: OptionLeg[] = [{ symbol: 'CE_BUY', token: 'T1', entryPremium: 100, qty: 65, type: 'CE', direction: 'BUY' }];
+      const legWithoutLtp: OptionLeg[] = [
+        { symbol: 'CE_BUY', token: 'T1', entryPremium: 100, qty: 65, type: 'CE', direction: 'BUY' },
+      ];
       expect(calculateCurrentPnL(legWithoutLtp)).toBe(0);
     });
   });
@@ -101,4 +140,3 @@ describe('monitorJob', () => {
     });
   });
 });
-
