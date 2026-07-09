@@ -38,7 +38,7 @@ class SmartStreamClient {
     try {
       const url = 'wss://smartapisocket.angelone.in/smart-stream';
       const wsHeaders = {
-        Authorization: ${session.jwtToken},
+        Authorization: `${session.jwtToken}`,
         'x-api-key': env.API_KEY,
         'x-client-code': env.CLIENT_CODE,
         'x-feed-token': session.feedToken,
