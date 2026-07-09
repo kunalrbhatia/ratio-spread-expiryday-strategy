@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ['CI']
     types:
       - completed
     branches: [master]
@@ -21,7 +21,7 @@ jobs:
           key: ${{ secrets.ORACLE_SSH_KEY }}
           script: |
             export PATH=$PATH:/home/ubuntu/.nvm/versions/node/v24.16.0/bin
-            cd ~/nifty-supertrend
+            cd ~/ratiospread-expiry-strategy || cd ~/ratio-spread-expiryday-strategy || { echo "Directory not found"; exit 1; }
             git reset --hard
             git clean -fd
             git fetch origin master
