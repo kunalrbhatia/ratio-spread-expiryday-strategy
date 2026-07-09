@@ -16,19 +16,19 @@ export interface ScripItem {
   tick_size: string;
 }
 
-export const getNextWeeklyExpiryDate = (fromDate: Date = new Date()): string => {
+import { INDEX_CONFIGS } from './constants.js';
+import { isExpiryDayForSymbol } from './holidayCheck.js';
+
+export const getNextWeeklyExpiryDate = (
+  symbol: 'NIFTY' | 'SENSEX',
+  fromDate: Date = new Date(),
+): string => {
   const date = new Date(fromDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-  // Find next Tuesday (or Monday if Tuesday is holiday, but here we just find closest Tuesday/Monday expiry day)
-  // Let's iterate day by day up to 7 days
+  // Iterate day by day up to 8 days to find the next expiry day
   for (let i = 0; i < 8; i++) {
     const checkDate = new Date(date);
     checkDate.setDate(date.getDate() + i);
-    const day = checkDate.getDay();
-
-    // In options, weekly contracts expire on Tuesday (or previous trading day if Tuesday is holiday)
-    // We can check if today is Tuesday, or if it is Monday and Tuesday is a holiday
-    if (day === 2) {
-      // Tuesday
+    if (isExpiryDayForSymbol(symbol, checkDate)) {
       return formatScripExpiryDate(checkDate);
     }
   }
@@ -57,9 +57,11 @@ const formatScripExpiryDate = (date: Date): string => {
   return `${day}${month}${year}`;
 };
 
-export const downloadAndCacheScripMaster = async (): Promise<boolean> => {
+export const downloadAndCacheScripMaster = async (
+  symbol: 'NIFTY' | 'SENSEX' = 'NIFTY',
+): Promise<boolean> => {
   try {
-    logger.info('Downloading Angel One scrip master header...');
+    logger.info(`Downloading Angel One scrip master header for ${symbol}...`);
     const response = await axios({
       method: 'GET',
       url: CONSTANTS.SCRIP_MASTER_URL,
@@ -71,23 +73,25 @@ export const downloadAndCacheScripMaster = async (): Promise<boolean> => {
     }
 
     logger.info(
-      `Downloaded ${response.data.length} total scrip headers. Filtering Nifty option contracts...`,
+      `Downloaded ${response.data.length} total scrip headers. Filtering ${symbol} option contracts...`,
     );
 
-    const nextExpiry = getNextWeeklyExpiryDate();
-    logger.info(`Target weekly expiry date: ${nextExpiry}`);
+    const nextExpiry = getNextWeeklyExpiryDate(symbol);
+    logger.info(`Target weekly expiry date for ${symbol}: ${nextExpiry}`);
+
+    const config = INDEX_CONFIGS[symbol];
 
     // Filter contracts
     const filtered: ScripItem[] = response.data.filter((item: ScripItem) => {
       return (
-        item.name === CONSTANTS.NIFTY_SYMBOL &&
-        item.exch_seg === 'NFO' &&
+        item.name === config.symbol &&
+        item.exch_seg === config.optionExchange &&
         item.instrumenttype === 'OPTIDX' &&
         item.expiry === nextExpiry
       );
     });
 
-    const cachePath = path.join(process.cwd(), 'data', 'scrip-master.json');
+    const cachePath = path.join(process.cwd(), 'data', `scrip-master-${symbol.toLowerCase()}.json`);
     const dir = path.dirname(cachePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -95,17 +99,17 @@ export const downloadAndCacheScripMaster = async (): Promise<boolean> => {
 
     fs.writeFileSync(cachePath, JSON.stringify(filtered, null, 2), 'utf-8');
     logger.info(
-      `Successfully cached ${filtered.length} Nifty option contracts to data/scrip-master.json`,
+      `Successfully cached ${filtered.length} ${symbol} option contracts to data/scrip-master-${symbol.toLowerCase()}.json`,
     );
     return true;
   } catch (error: any) {
-    logger.error(`Failed to download or cache scrip master: ${error.message}`);
+    logger.error(`Failed to download or cache scrip master for ${symbol}: ${error.message}`);
     return false;
   }
 };
 
-export const getCachedScrips = (): ScripItem[] => {
-  const cachePath = path.join(process.cwd(), 'data', 'scrip-master.json');
+export const getCachedScrips = (symbol: 'NIFTY' | 'SENSEX' = 'NIFTY'): ScripItem[] => {
+  const cachePath = path.join(process.cwd(), 'data', `scrip-master-${symbol.toLowerCase()}.json`);
   if (fs.existsSync(cachePath)) {
     return JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
   }

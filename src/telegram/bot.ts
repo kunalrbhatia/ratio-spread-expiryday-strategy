@@ -8,7 +8,7 @@ import {
   isKillSwitchActive,
   setKillSwitch,
 } from '../helpers/modeManager.js';
-import { positionStore } from '../store/positionStore.js';
+import { positionStores } from '../store/positionStore.js';
 import { calculateCurrentPnL } from '../jobs/monitorJob.js';
 import { downloadAndCacheScripMaster } from '../helpers/scripMaster.js';
 import { logger } from '../helpers/logger.js';
@@ -28,39 +28,42 @@ export const startTelegramBot = () => {
     // Command: /status
     telegramBot.command('status', async (ctx) => {
       try {
-        const positions = positionStore.getPositions();
         const paper = isPaperMode();
 
         let msg = `ℹ️ <b>System Status</b>\n`;
         msg += `<b>Trading Mode:</b> ${paper ? '🧪 PAPER' : '⚡ LIVE'}\n`;
-
-        if (!positions.active) {
-          msg += `<b>Position:</b> No active trade today.`;
-          return ctx.replyWithHTML(msg);
-        }
-
-        // Fetch fresh prices for status reporting
-        const tokens = positions.legs.map((l) => l.token);
-        const freshPrices = await getOptionLtps(tokens);
-
-        // Update positions array temporarily for calculation
-        const updatedLegs = positions.legs.map((l) => ({
-          ...l,
-          currentPrice: freshPrices.get(l.token) ?? l.currentPrice ?? l.entryPremium,
-        }));
-
-        const currentPnL = calculateCurrentPnL(updatedLegs);
-
-        msg += `---------------------------------\n`;
-        msg += `<b>Position Status:</b> ACTIVE\n`;
-        msg += `<b>Entry Margin:</b> ₹${positions.entryMargin.toLocaleString()}\n`;
-        msg += `<b>Stop Loss (1%):</b> ₹${positions.stopLoss.toLocaleString()}\n`;
-        msg += `<b>Current P&L:</b> ₹${currentPnL.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n`;
         msg += `---------------------------------\n`;
 
-        for (const leg of updatedLegs) {
-          msg += `• <b>${leg.symbol}</b> (${leg.direction})\n`;
-          msg += `  Entry: ₹${leg.entryPremium} | LTP: ₹${leg.currentPrice}\n`;
+        for (const symbol of ['NIFTY', 'SENSEX'] as const) {
+          const store = positionStores[symbol];
+          const positions = store.getPositions();
+
+          if (positions.active) {
+            // Fetch fresh prices for status reporting
+            const tokens = positions.legs.map((l) => l.token);
+            const freshPrices = await getOptionLtps(tokens, symbol);
+
+            // Update positions array temporarily for calculation
+            const updatedLegs = positions.legs.map((l) => ({
+              ...l,
+              currentPrice: freshPrices.get(l.token) ?? l.currentPrice ?? l.entryPremium,
+            }));
+
+            const currentPnL = calculateCurrentPnL(updatedLegs);
+
+            msg += `📈 <b>${symbol} Position Status:</b> ACTIVE\n`;
+            msg += `<b>Entry Margin:</b> ₹${positions.entryMargin.toLocaleString()}\n`;
+            msg += `<b>Stop Loss (1%):</b> ₹${positions.stopLoss.toLocaleString()}\n`;
+            msg += `<b>Current P&L:</b> ₹${currentPnL.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n`;
+
+            for (const leg of updatedLegs) {
+              msg += `  • <b>${leg.symbol}</b> (${leg.direction})\n`;
+              msg += `    Entry: ₹${leg.entryPremium} | LTP: ₹${leg.currentPrice}\n`;
+            }
+          } else {
+            msg += `⚪ <b>${symbol} Position:</b> No active trade today.\n`;
+          }
+          msg += `---------------------------------\n`;
         }
 
         ctx.replyWithHTML(msg);
@@ -108,12 +111,11 @@ export const startTelegramBot = () => {
 
     // Command: /update
     telegramBot.command('update', async (ctx) => {
-      ctx.reply('Initiating options scrip master update...');
-      const success = await downloadAndCacheScripMaster();
+      ctx.reply('Initiating options scrip master update for both indices...');
+      const successNifty = await downloadAndCacheScripMaster('NIFTY');
+      const successSensex = await downloadAndCacheScripMaster('SENSEX');
       ctx.reply(
-        success
-          ? '✅ Scrip master downloaded and cached successfully.'
-          : '❌ Scrip master download failed.',
+        `NIFTY update: ${successNifty ? '✅ Success' : '❌ Failed'}\nSENSEX update: ${successSensex ? '✅ Success' : '❌ Failed'}`,
       );
     });
 

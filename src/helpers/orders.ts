@@ -8,10 +8,11 @@ export interface OrderParams {
   symboltoken: string;
   transactiontype: 'BUY' | 'SELL';
   quantity: number; // raw quantity (lots * lotSize)
+  exchange: 'NFO' | 'BFO';
 }
 
 export interface MarginLeg {
-  exchange: 'NFO';
+  exchange: 'NFO' | 'BFO';
   qty: number;
   price: number;
   productType: 'CARRYFORWARD';
@@ -22,7 +23,7 @@ export interface MarginLeg {
 export const placeOptionOrder = async (params: OrderParams): Promise<string> => {
   const paper = isPaperMode();
   logger.info(
-    `Placing Order: [${paper ? 'PAPER' : 'LIVE'}] ${params.transactiontype} ${params.quantity} qty of ${params.tradingsymbol} (${params.symboltoken})`,
+    `Placing Order: [${paper ? 'PAPER' : 'LIVE'}] ${params.transactiontype} ${params.quantity} qty of ${params.tradingsymbol} (${params.symboltoken}) on ${params.exchange}`,
   );
 
   if (paper) {
@@ -41,7 +42,7 @@ export const placeOptionOrder = async (params: OrderParams): Promise<string> => 
         tradingsymbol: params.tradingsymbol,
         symboltoken: params.symboltoken,
         transactiontype: params.transactiontype,
-        exchange: 'NFO',
+        exchange: params.exchange,
         ordertype: 'MARKET',
         producttype: 'CARRYFORWARD',
         duration: 'DAY',

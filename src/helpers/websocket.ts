@@ -3,7 +3,8 @@ import { env } from '../config/env.js';
 import { sessionStore } from '../store/sessionStore.js';
 import { logger } from './logger.js';
 import { isPaperMode } from './modeManager.js';
-import { positionStore } from '../store/positionStore.js';
+import { positionStores } from '../store/positionStore.js';
+import { INDEX_CONFIGS } from './constants.js';
 
 export interface TickData {
   token: string;
@@ -21,6 +22,10 @@ class SmartStreamClient {
 
   public connect(callback: TickCallback) {
     this.callback = callback;
+
+    if (this.isConnected) {
+      return;
+    }
 
     if (isPaperMode()) {
       logger.info('Starting SmartStream Client in [PAPER MODE] mock tick generator');
@@ -53,28 +58,34 @@ class SmartStreamClient {
         logger.info('SmartStream WebSocket connection established successfully.');
         this.isConnected = true;
         // Re-subscribe if we had previous tokens
+        // Since we don't store the symbol for cached tokens, we can check where they belong
         if (this.subscribedTokens.size > 0) {
-          this.subscribe(Array.from(this.subscribedTokens));
+          // Re-subscribe in separate payloads depending on whether they are NSE or BSE
+          const niftyTokens: string[] = [];
+          const sensexTokens: string[] = [];
+
+          const niftyPositions = positionStores.NIFTY.getPositions();
+          const sensexPositions = positionStores.SENSEX.getPositions();
+
+          for (const token of this.subscribedTokens) {
+            if (niftyPositions.legs.some((l) => l.token === token)) {
+              niftyTokens.push(token);
+            } else if (sensexPositions.legs.some((l) => l.token === token)) {
+              sensexTokens.push(token);
+            } else {
+              // Default fallback
+              niftyTokens.push(token);
+            }
+          }
+
+          if (niftyTokens.length > 0) this.subscribe(niftyTokens, 'NIFTY');
+          if (sensexTokens.length > 0) this.subscribe(sensexTokens, 'SENSEX');
         }
       });
 
       this.ws.on('message', (data: WebSocket.Data) => {
         try {
-          // Angel One SmartStream sends binary data packets
-          // Format of packet:
-          // Check bytes: token is typically at a certain offset, and LTP is at another offset.
-          // Let's implement a parser. SmartStream binary packet structure:
-          // 0-0: Subscription Type (e.g. 1 = Quote, 3 = Snapquote, etc.)
-          // 1-25: Exchange Type / Token
-          // LTP is typically 4 bytes integer (divided by 100) at offset 26.
-          // Or we can parse it as JSON if it's sent as text in some segments.
-          // In case of binary parse errors, we fall back to a mock simulation if we want to ensure stability.
           if (Buffer.isBuffer(data)) {
-            // Let's extract values
-            // This is a typical Quote packet mapping:
-            // Byte 1: Subscription Type (1)
-            // Byte 2-26: Token (padded string)
-            // Byte 27-30: Last Traded Price (4-byte Int, Big/Little Endian / 100)
             const type = data.readUInt8(0);
             if (type === 1 || type === 3) {
               const tokenBuffer = data.slice(1, 26);
@@ -108,7 +119,7 @@ class SmartStreamClient {
     }
   }
 
-  public subscribe(tokens: string[]) {
+  public subscribe(tokens: string[], symbol: 'NIFTY' | 'SENSEX') {
     tokens.forEach((t) => this.subscribedTokens.add(t));
 
     if (isPaperMode()) {
@@ -117,24 +128,53 @@ class SmartStreamClient {
     }
 
     if (this.ws && this.isConnected) {
-      // SmartAPI Subscription request payload:
-      // Binary payload, or JSON depending on protocol version.
-      // Usually, JSON representation is:
-      // { "action": 1, "params": { "mode": 1, "tokenList": [ { "exchangeType": 2, "tokens": ["35002"] } ] } }
+      const config = INDEX_CONFIGS[symbol];
       const payload = {
         action: 1, // 1 = Subscribe
         params: {
           mode: 1, // 1 = LTP
           tokenList: [
             {
-              exchangeType: 2, // 2 = NFO (Options)
+              exchangeType: config.optionExchange === 'NFO' ? 2 : 4, // 2 = NFO, 4 = BFO
               tokens,
             },
           ],
         },
       };
       this.ws.send(JSON.stringify(payload));
-      logger.info(`Subscribed to SmartStream tokens: ${tokens.join(', ')}`);
+      logger.info(`Subscribed to SmartStream tokens: ${tokens.join(', ')} for ${symbol}`);
+    }
+  }
+
+  public unsubscribe(tokens: string[], symbol: 'NIFTY' | 'SENSEX') {
+    tokens.forEach((t) => this.subscribedTokens.delete(t));
+
+    if (isPaperMode()) {
+      logger.info(`Mock unsubscribed from tokens: ${tokens.join(', ')}`);
+      return;
+    }
+
+    if (this.ws && this.isConnected) {
+      const config = INDEX_CONFIGS[symbol];
+      const payload = {
+        action: 2, // 2 = Unsubscribe
+        params: {
+          mode: 1, // 1 = LTP
+          tokenList: [
+            {
+              exchangeType: config.optionExchange === 'NFO' ? 2 : 4, // 2 = NFO, 4 = BFO
+              tokens,
+            },
+          ],
+        },
+      };
+      this.ws.send(JSON.stringify(payload));
+      logger.info(`Unsubscribed from SmartStream tokens: ${tokens.join(', ')} for ${symbol}`);
+    }
+
+    // If no more tokens are subscribed across both indices, disconnect
+    if (this.subscribedTokens.size === 0) {
+      this.disconnect();
     }
   }
 
@@ -157,8 +197,13 @@ class SmartStreamClient {
     this.mockInterval = setInterval(() => {
       if (!this.callback) return;
 
-      const positions = positionStore.getPositions();
-      if (!positions.active || positions.legs.length === 0) {
+      const niftyPositions = positionStores.NIFTY.getPositions();
+      const sensexPositions = positionStores.SENSEX.getPositions();
+
+      const niftyActive = niftyPositions.active && niftyPositions.legs.length > 0;
+      const sensexActive = sensexPositions.active && sensexPositions.legs.length > 0;
+
+      if (!niftyActive && !sensexActive) {
         // Emit general dummy ticks if no active positions
         for (const token of this.subscribedTokens) {
           const ltp = 100 + (Math.random() - 0.5) * 5;
@@ -167,20 +212,37 @@ class SmartStreamClient {
         return;
       }
 
-      // Simulate realistic option pricing changes based on their direction
-      // CE / PE long positions decay slightly, short positions decay, random walks
-      for (const leg of positions.legs) {
-        if (this.subscribedTokens.has(leg.token)) {
-          const currentPrice = leg.currentPrice || leg.entryPremium;
-          // Apply a small random walk with a downward bias (theta decay)
-          const change = (Math.random() - 0.53) * 1.5;
-          const nextPrice = Math.max(0.05, currentPrice + change);
-          leg.currentPrice = nextPrice;
+      // Simulate realistic option pricing changes for NIFTY
+      if (niftyActive) {
+        for (const leg of niftyPositions.legs) {
+          if (this.subscribedTokens.has(leg.token)) {
+            const currentPrice = leg.currentPrice || leg.entryPremium;
+            const change = (Math.random() - 0.53) * 1.5;
+            const nextPrice = Math.max(0.05, currentPrice + change);
+            positionStores.NIFTY.updateLegPrice(leg.token, nextPrice);
 
-          this.callback({
-            token: leg.token,
-            ltp: parseFloat(nextPrice.toFixed(2)),
-          });
+            this.callback({
+              token: leg.token,
+              ltp: parseFloat(nextPrice.toFixed(2)),
+            });
+          }
+        }
+      }
+
+      // Simulate realistic option pricing changes for SENSEX
+      if (sensexActive) {
+        for (const leg of sensexPositions.legs) {
+          if (this.subscribedTokens.has(leg.token)) {
+            const currentPrice = leg.currentPrice || leg.entryPremium;
+            const change = (Math.random() - 0.53) * 1.5;
+            const nextPrice = Math.max(0.05, currentPrice + change);
+            positionStores.SENSEX.updateLegPrice(leg.token, nextPrice);
+
+            this.callback({
+              token: leg.token,
+              ltp: parseFloat(nextPrice.toFixed(2)),
+            });
+          }
         }
       }
     }, 1500);

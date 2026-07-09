@@ -28,7 +28,7 @@ export const isNSEHoliday = (date: Date): boolean => {
   return NSE_HOLIDAYS_2026.includes(formatted);
 };
 
-export const isExpiryDay = (date: Date): boolean => {
+export const isExpiryDayForSymbol = (symbol: 'NIFTY' | 'SENSEX', date: Date): boolean => {
   // Get date in Asia/Kolkata timezone
   const kolkataDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   const day = kolkataDate.getDay();
@@ -37,17 +37,27 @@ export const isExpiryDay = (date: Date): boolean => {
     return false;
   }
 
-  if (day === 2) {
-    // Normal expiry is Tuesday
+  const targetDay = symbol === 'NIFTY' ? 2 : 4; // Tuesday = 2, Thursday = 4
+
+  if (day === targetDay) {
     return true;
   }
 
-  if (day === 1) {
-    // Shifts to Monday if Tuesday is a holiday
-    const tomorrow = new Date(kolkataDate);
-    tomorrow.setDate(kolkataDate.getDate() + 1);
-    return isNSEHoliday(tomorrow);
+  if (day < targetDay && day > 0) {
+    // Shifts to previous trading day if target day is a holiday
+    for (let d = day + 1; d <= targetDay; d++) {
+      const checkDate = new Date(kolkataDate);
+      checkDate.setDate(kolkataDate.getDate() + (d - day));
+      if (!isNSEHoliday(checkDate)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   return false;
+};
+
+export const isExpiryDay = (date: Date): boolean => {
+  return isExpiryDayForSymbol('NIFTY', date);
 };

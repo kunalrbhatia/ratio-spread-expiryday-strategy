@@ -1,11 +1,11 @@
 import cron from 'node-cron';
 import { logger } from './helpers/logger.js';
-import { isExpiryDay } from './helpers/holidayCheck.js';
+import { isExpiryDayForSymbol } from './helpers/holidayCheck.js';
 import { loginToSmartAPI } from './helpers/login.js';
 import { downloadAndCacheScripMaster } from './helpers/scripMaster.js';
 import { executeExpiryStrategyEntry } from './jobs/entryJob.js';
 import { startContinuousMonitoring, exitAllPositions } from './jobs/monitorJob.js';
-import { positionStore } from './store/positionStore.js';
+import { positionStores } from './store/positionStore.js';
 import { startTelegramBot } from './telegram/bot.js';
 import { startExpressServer } from './server.js';
 import { isPaperMode } from './helpers/modeManager.js';
@@ -33,11 +33,15 @@ const bootstrap = async () => {
       }
     }
 
-    // 3. Recovery check: If there was a crash/restart and we have an active position, resume monitoring
-    const positions = positionStore.getPositions();
-    if (positions.active) {
-      logger.warn('Found active positions from a previous run. Resuming live monitoring...');
-      startContinuousMonitoring();
+    // 3. Recovery check: If there was a crash/restart and we have active positions, resume monitoring
+    for (const symbol of ['NIFTY', 'SENSEX'] as const) {
+      const positions = positionStores[symbol].getPositions();
+      if (positions.active) {
+        logger.warn(
+          `Found active ${symbol} positions from a previous run. Resuming live monitoring...`,
+        );
+        startContinuousMonitoring(symbol);
+      }
     }
 
     // 4. Register Scheduled Crons (Asia/Kolkata Timezone)
@@ -47,15 +51,25 @@ const bootstrap = async () => {
       '30 8 * * 1-5',
       async () => {
         logger.info('Cron triggered: Starting morning scrip master cache update...');
-        // Only download scrips on expiry days to optimize bandwith/rate limit usage
-        if (isExpiryDay(new Date())) {
+        const today = new Date();
+        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
+        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
+
+        if (isNiftyExpiry || isSensexExpiry) {
           if (!isPaperMode()) {
             const loginSuccess = await loginToSmartAPI();
             if (!loginSuccess) return;
           }
-          await downloadAndCacheScripMaster();
+          if (isNiftyExpiry) {
+            await downloadAndCacheScripMaster('NIFTY');
+          }
+          if (isSensexExpiry) {
+            await downloadAndCacheScripMaster('SENSEX');
+          }
         } else {
-          logger.info('Today is not an expiry day. Skipping scrip master download.');
+          logger.info(
+            'Today is not an expiry day for NIFTY or SENSEX. Skipping scrip master download.',
+          );
         }
       },
       {
@@ -68,7 +82,11 @@ const bootstrap = async () => {
       '20 9 * * 1-5',
       async () => {
         logger.info('Cron triggered: Checking for expiry strategy entry (09:20 AM)...');
-        if (isExpiryDay(new Date())) {
+        const today = new Date();
+        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
+        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
+
+        if (isNiftyExpiry || isSensexExpiry) {
           if (!isPaperMode()) {
             const loginSuccess = await loginToSmartAPI();
             if (!loginSuccess) {
@@ -77,13 +95,25 @@ const bootstrap = async () => {
             }
           }
 
-          const success = await executeExpiryStrategyEntry();
-          if (success) {
-            logger.info('Strategy entered successfully. Starting monitoring...');
-            startContinuousMonitoring();
+          if (isNiftyExpiry) {
+            logger.info('Today is NIFTY expiry. Executing NIFTY strategy entry...');
+            const success = await executeExpiryStrategyEntry('NIFTY');
+            if (success) {
+              logger.info('NIFTY Strategy entered successfully. Starting monitoring...');
+              startContinuousMonitoring('NIFTY');
+            }
+          }
+
+          if (isSensexExpiry) {
+            logger.info('Today is SENSEX expiry. Executing SENSEX strategy entry...');
+            const success = await executeExpiryStrategyEntry('SENSEX');
+            if (success) {
+              logger.info('SENSEX Strategy entered successfully. Starting monitoring...');
+              startContinuousMonitoring('SENSEX');
+            }
           }
         } else {
-          logger.info('Today is not an expiry day. Skipping strategy entry.');
+          logger.info('Today is not an expiry day for NIFTY or SENSEX. Skipping strategy entry.');
         }
       },
       {
@@ -96,16 +126,32 @@ const bootstrap = async () => {
       '30 15 * * 1-5',
       async () => {
         logger.info('Cron triggered: Checking for market close square-off (03:30 PM)...');
-        if (isExpiryDay(new Date())) {
-          const positions = positionStore.getPositions();
-          if (positions.active) {
-            if (!isPaperMode()) {
-              await loginToSmartAPI();
+        const today = new Date();
+        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
+        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
+
+        if (isNiftyExpiry || isSensexExpiry) {
+          if (!isPaperMode()) {
+            await loginToSmartAPI();
+          }
+
+          if (isNiftyExpiry) {
+            const positions = positionStores.NIFTY.getPositions();
+            if (positions.active) {
+              await exitAllPositions('NIFTY', 'Market close square-off (03:30 PM)');
             }
-            await exitAllPositions('Market close square-off (03:30 PM)');
+          }
+
+          if (isSensexExpiry) {
+            const positions = positionStores.SENSEX.getPositions();
+            if (positions.active) {
+              await exitAllPositions('SENSEX', 'Market close square-off (03:30 PM)');
+            }
           }
         } else {
-          logger.info('Today is not an expiry day. Skipping market close check.');
+          logger.info(
+            'Today is not an expiry day for NIFTY or SENSEX. Skipping market close check.',
+          );
         }
       },
       {

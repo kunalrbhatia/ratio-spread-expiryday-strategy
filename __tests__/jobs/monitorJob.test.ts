@@ -97,7 +97,8 @@ describe('monitorJob', () => {
 
       startContinuousMonitoring();
       expect(wsConnectSpy).toHaveBeenCalled();
-      expect(wsSubSpy).toHaveBeenCalledWith(['T1', 'T2', 'T3', 'T4']);
+      expect(wsSubSpy).toHaveBeenCalledWith(['T1', 'T2', 'T3', 'T4'], 'NIFTY');
     });
   });
 });
+
