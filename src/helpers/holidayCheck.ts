@@ -1,3 +1,5 @@
+import { env } from '../config/env.js';
+
 // Hardcoded list of NSE trading holidays for 2026 (Format: YYYY-MM-DD)
 export const NSE_HOLIDAYS_2026 = [
   '2026-01-26', // Republic Day
@@ -29,6 +31,10 @@ export const isNSEHoliday = (date: Date): boolean => {
 };
 
 export const isExpiryDayForSymbol = (symbol: 'NIFTY' | 'SENSEX', date: Date): boolean => {
+  if (symbol === 'SENSEX' && !env.ENABLE_SENSEX_EXPIRY) {
+    return false;
+  }
+
   // Get date in Asia/Kolkata timezone
   const kolkataDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   const day = kolkataDate.getDay();
