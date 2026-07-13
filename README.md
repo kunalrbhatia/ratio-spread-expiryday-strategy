@@ -45,7 +45,11 @@ TELEGRAM_CHAT_ID=your_chat_id
 # Slack Webhook (Fallback Alerting)
 SLACK_ENABLED=true
 SLACK_WEBHOOK_URL=your_incoming_webhook_url
+
+# Strategy Options
+ENABLE_SENSEX_EXPIRY=true
 ```
+
 
 ---
 
