@@ -1,3 +1,4 @@
+import { env } from '../../src/config/env.js';
 import {
   isWeekend,
   isNSEHoliday,
@@ -68,6 +69,15 @@ describe('holidayCheck helper', () => {
 
     it('should return false on Thursday if it is a holiday', () => {
       expect(isExpiryDayForSymbol('SENSEX', new Date('2026-06-25'))).toBe(false);
+    });
+
+    it('should return false for SENSEX expiry when ENABLE_SENSEX_EXPIRY is false', () => {
+      env.ENABLE_SENSEX_EXPIRY = false;
+      try {
+        expect(isExpiryDayForSymbol('SENSEX', new Date('2026-06-18'))).toBe(false);
+      } finally {
+        env.ENABLE_SENSEX_EXPIRY = true;
+      }
     });
   });
 });

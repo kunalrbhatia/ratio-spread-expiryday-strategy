@@ -15,6 +15,7 @@ export interface Env {
   SLACK_ENABLED: boolean;
   SLACK_WEBHOOK_URL?: string;
   SLACK_SIGNING_SECRET?: string;
+  ENABLE_SENSEX_EXPIRY: boolean;
 }
 
 const getEnvOrThrow = (key: string, defaultValue?: string): string => {
@@ -49,6 +50,7 @@ export const env: Env = {
   CLIENT_TOTP_PIN: getEnvOrThrow('CLIENT_TOTP_PIN'),
   TELEGRAM_ENABLED: getEnvBool('TELEGRAM_ENABLED', 'true'),
   SLACK_ENABLED: getEnvBool('SLACK_ENABLED', 'false'),
+  ENABLE_SENSEX_EXPIRY: getEnvBool('ENABLE_SENSEX_EXPIRY', 'true'),
 };
 
 if (env.TELEGRAM_ENABLED) {

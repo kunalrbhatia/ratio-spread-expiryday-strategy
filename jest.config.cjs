@@ -5,6 +5,7 @@ process.env.CLIENT_PIN = '1234';
 process.env.CLIENT_TOTP_PIN = 'MOCK_TOTP_SECRET';
 process.env.TELEGRAM_ENABLED = 'false';
 process.env.SLACK_ENABLED = 'false';
+process.env.ENABLE_SENSEX_EXPIRY = 'true';
 
 /** @type {import('jest').Config} */
 const config = {
