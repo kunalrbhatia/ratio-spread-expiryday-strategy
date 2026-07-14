@@ -98,6 +98,7 @@ The following endpoint patches are applied in `src/helpers/`:
 | WebSocket URL `smartapisec.angelone.in` has no DNS | Use `smartapisocket.angelone.in/smart-stream` | `websocket.ts` |
 | WS auth: `Bearer` prefix rejected | Send raw JWT token in `Authorization` header | `websocket.ts` |
 | WS SSL cert validation | Set `rejectUnauthorized: false` | `websocket.ts` |
+| Margin API returns 400 `"Order type is required"` | Add `orderType: 'MARKET'` to each margin leg; read `totalMarginRequired` from response | `orders.ts`, `entryJob.ts` |
 
 ## Post-Expiry Analysis
 
