@@ -18,6 +18,7 @@ export interface MarginLeg {
   productType: 'CARRYFORWARD';
   token: string;
   tradeType: 'BUY' | 'SELL';
+  orderType: 'MARKET';
 }
 
 export const placeOptionOrder = async (params: OrderParams): Promise<string> => {
@@ -88,9 +89,7 @@ export const fetchUtilizedMargin = async (legs: MarginLeg[]): Promise<number> =>
     });
 
     if (response.status === true && response.data) {
-      // Access total margin requirement from the response structure
-      // Typically response contains totalMargin / marginBlock or similar
-      const margin = parseFloat(response.data.totalMargin || response.data.marginBlock || '0');
+      const margin = parseFloat(response.data.totalMarginRequired || '0');
       logger.info(`Fetched utilized margin from SmartAPI: ₹${margin}`);
       return margin > 0 ? margin : 350000; // fallback if api returns 0
     }

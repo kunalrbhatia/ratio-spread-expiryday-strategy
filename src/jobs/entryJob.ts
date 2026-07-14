@@ -151,6 +151,7 @@ export const executeExpiryStrategyEntry = async (
       productType: 'CARRYFORWARD',
       token: leg.token,
       tradeType: leg.direction,
+      orderType: 'MARKET',
     }));
 
     const totalMargin = await fetchUtilizedMargin(marginLegs);
