@@ -61,7 +61,7 @@ export const apiRequest = async <T = any>(config: AxiosRequestConfig): Promise<T
       'X-SourceID': 'WEB',
       'X-ClientLocalIP': '192.168.1.1',
       'X-ClientPublicIP': '106.193.147.98',
-      'X-MACAddress': 'fe80::216:3eff:fe0f:1105',
+      'X-MACaddress': 'fe80::216:3eff:fe0f:1105',
       'X-PrivateKey': env.API_KEY,
       ...(config.headers || {}),
     } as any;
