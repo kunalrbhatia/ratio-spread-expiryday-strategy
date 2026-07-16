@@ -18,31 +18,83 @@ envContent.split('\n').filter(l => l.trim() && !l.startsWith('#')).forEach(line 
   env[k.trim()] = v.join('=').trim();
 });
 
-const NIFTY_SPOT_TOKEN=Buffer.from([57,57,57,50,54,48,48,48]).toString();
 const BASE_URL = 'https://apiconnect.angelone.in';
 const REPO_DIR = path.resolve(__dirname, '..');
 const ANALYSIS_DIR = path.join(REPO_DIR, 'analysis');
 const REPORTS_DIR = path.join(ANALYSIS_DIR, 'reports');
 
+const INDEX_CONFIGS = {
+  NIFTY: {
+    symbol: 'NIFTY',
+    spotToken: '99926000',
+    exchange: 'NSE',
+    optionExchange: 'NFO',
+    titleName: 'Nifty',
+    strategyType: 'Nifty Weekly Ratio Spread (Short 3, Long 1 on each side)'
+  },
+  SENSEX: {
+    symbol: 'SENSEX',
+    spotToken: '99919000',
+    exchange: 'BSE',
+    optionExchange: 'BFO',
+    titleName: 'Sensex',
+    strategyType: 'Sensex Weekly Ratio Spread (Short 3, Long 1 on each side)'
+  }
+};
 
 async function generateReport() {
-  // 1. Determine expiry date
+  // 1. Determine index symbol
+  let symbol = process.argv[2]?.toUpperCase();
+  if (symbol !== 'NIFTY' && symbol !== 'SENSEX') {
+    // Autodetect based on active positions
+    const niftyPath = path.join(REPO_DIR, 'data', 'nifty_positions.json');
+    const sensexPath = path.join(REPO_DIR, 'data', 'sensex_positions.json');
+    const niftyActive = fs.existsSync(niftyPath) && JSON.parse(fs.readFileSync(niftyPath, 'utf8')).active;
+    const sensexActive = fs.existsSync(sensexPath) && JSON.parse(fs.readFileSync(sensexPath, 'utf8')).active;
+
+    if (niftyActive && !sensexActive) {
+      symbol = 'NIFTY';
+    } else if (sensexActive && !niftyActive) {
+      symbol = 'SENSEX';
+    } else {
+      // Look at which one has legs populated
+      const niftyLegs = fs.existsSync(niftyPath) && (JSON.parse(fs.readFileSync(niftyPath, 'utf8')).legs?.length > 0);
+      const sensexLegs = fs.existsSync(sensexPath) && (JSON.parse(fs.readFileSync(sensexPath, 'utf8')).legs?.length > 0);
+      if (niftyLegs && !sensexLegs) {
+        symbol = 'NIFTY';
+      } else if (sensexLegs && !niftyLegs) {
+        symbol = 'SENSEX';
+      } else {
+        // Fallback to current expiry day
+        const today = new Date();
+        const kolkataDate = new Date(today.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        const day = kolkataDate.getDay();
+        if (day === 4) { // Thursday is Sensex
+          symbol = 'SENSEX';
+        } else {
+          symbol = 'NIFTY'; // Default
+        }
+      }
+    }
+  }
+
+  const config = INDEX_CONFIGS[symbol];
   const now = new Date();
   const expiryDate = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).replace(/\s/g, '-');
   const isoDate = now.toISOString().split('T')[0];
-  const weekNum = Math.ceil(new Date().getDate() / 7);
 
-  console.log(`📊 Generating post-expiry analysis for ${expiryDate}`);
+  console.log(`📊 Generating post-expiry analysis for ${symbol} on ${expiryDate}`);
 
   // 2. Load snapshot data
   const snapFile = path.join(ANALYSIS_DIR, 'snapshots', `${isoDate}.jsonl`);
   let snapshots = [];
   if (fs.existsSync(snapFile)) {
-    snapshots = fs.readFileSync(snapFile, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+    const allSnaps = fs.readFileSync(snapFile, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+    snapshots = allSnaps.filter(s => s.index === symbol || (!s.index && symbol === 'NIFTY'));
   }
 
-  // 3. Load final positions
-  const posPath = path.join(REPO_DIR, 'data', 'positions.json');
+  // 3. Load positions
+  const posPath = path.join(REPO_DIR, 'data', `${symbol.toLowerCase()}_positions.json`);
   let finalState = null;
   if (fs.existsSync(posPath)) {
     finalState = JSON.parse(fs.readFileSync(posPath, 'utf8'));
@@ -53,7 +105,7 @@ async function generateReport() {
   let finalLegs = [];
   let finalSpot = 0;
 
-  if (finalState && finalState.active) {
+  if (finalState && finalState.legs && finalState.legs.length > 0) {
     try {
       const totp = authenticator.generate(env.CLIENT_TOTP_PIN);
       const loginRes = await axios({
@@ -75,14 +127,14 @@ async function generateReport() {
 
       const spotRes = await axios({
         method: 'POST', url: `${BASE_URL}/rest/secure/angelbroking/market/v1/quote`,
-        headers, data: { mode: 'LTP', exchangeTokens: { NSE: [NIFTY_SPOT_TOKEN] } }
+        headers, data: { mode: 'LTP', exchangeTokens: { [config.exchange]: [config.spotToken] } }
       });
       finalSpot = parseFloat(spotRes.data.data.fetched[0].ltp);
 
       const tokens = finalState.legs.map(l => l.token);
       const ltpRes = await axios({
         method: 'POST', url: `${BASE_URL}/rest/secure/angelbroking/market/v1/quote`,
-        headers, data: { mode: 'LTP', exchangeTokens: { NFO: tokens } }
+        headers, data: { mode: 'LTP', exchangeTokens: { [config.optionExchange]: tokens } }
       });
       const ltpMap = new Map();
       for (const item of ltpRes.data.data.fetched) {
@@ -102,75 +154,115 @@ async function generateReport() {
         const last = snapshots[snapshots.length - 1];
         finalPnL = last.totalPnL;
         finalLegs = last.legs;
-        finalSpot = last.niftySpot;
+        finalSpot = last.niftySpot || last.spot;
       }
     }
   }
 
   // 5. Calculate metrics
-  const maxPnL = snapshots.length > 0 ? Math.max(...snapshots.map(s => s.totalPnL)) : finalPnL;
-  const minPnL = snapshots.length > 0 ? Math.min(...snapshots.map(s => s.totalPnL)) : finalPnL;
-  const entrySpot = snapshots.length > 0 ? snapshots[0].niftySpot : 0;
+  let maxPnL = finalPnL;
+  let maxPnLTime = '';
+  let minPnL = finalPnL;
+  let minPnLTime = '';
+
+  if (snapshots.length > 0) {
+    let maxSnap = snapshots[0];
+    let minSnap = snapshots[0];
+    for (const s of snapshots) {
+      if (s.totalPnL > maxSnap.totalPnL) maxSnap = s;
+      if (s.totalPnL < minSnap.totalPnL) minSnap = s;
+    }
+    maxPnL = maxSnap.totalPnL;
+    maxPnLTime = maxSnap.ist?.split(',')[1]?.trim() || '';
+    minPnL = minSnap.totalPnL;
+    minPnLTime = minSnap.ist?.split(',')[1]?.trim() || '';
+  }
+
+  const entrySpot = snapshots.length > 0 ? (snapshots[0].spot || snapshots[0].niftySpot) : finalSpot;
   const spotChange = finalSpot - entrySpot;
+
+  // Format P&L helper
+  const formatPnL = (val) => {
+    const sign = val >= 0 ? '+' : '-';
+    return `${val >= 0 ? '🟢' : '🔴'} ${sign}₹${Math.abs(val).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   // 6. Build report
   const report = [
-    `# Expiry Day Analysis — ${expiryDate}`,
+    `# ${config.titleName} Expiry Day Analysis — ${expiryDate}`,
     ``,
     `## Summary`,
     ``,
     `| Metric | Value |`,
     `|--------|-------|`,
+    `| **Index** | ${config.titleName} |`,
     `| **Expiry Date** | ${expiryDate} |`,
-    `| **Nifty Entry** | ₹${entrySpot.toFixed(2)} |`,
-    `| **Nifty Close** | ₹${finalSpot.toFixed(2)} |`,
+    `| **Spot Entry** | ₹${entrySpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} |`,
+    `| **Spot Close** | ₹${finalSpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} |`,
     `| **Spot Change** | ${spotChange >= 0 ? '+' : ''}${spotChange.toFixed(2)} pts |`,
-    `| **Final P&L** | ${finalPnL >= 0 ? '🟢' : '🔴'} ₹${finalPnL.toFixed(2)} |`,
-    `| **Max P&L** | ₹${maxPnL.toFixed(2)} |`,
-    `| **Min P&L** | ₹${minPnL.toFixed(2)} |`,
-    `| **Entry Margin** | ₹${(finalState?.entryMargin || 0).toLocaleString()} |`,
-    `| **Return on Margin** | ${finalState?.entryMargin ? ((finalPnL / finalState.entryMargin) * 100).toFixed(2) : 'N/A'}% |`,
+    `| **Final P&L** | ${formatPnL(finalPnL)} |`,
+    `| **Max P&L** | +₹${maxPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${maxPnLTime ? ` (at ${maxPnLTime})` : ''} |`,
+    `| **Min P&L** | ${minPnL >= 0 ? '+' : '-'}₹${Math.abs(minPnL).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${minPnLTime ? ` (at ${minPnLTime})` : ''} |`,
+    `| **Entry Margin** | ₹${(finalState?.entryMargin || 350000).toLocaleString('en-IN')} |`,
+    `| **Return on Margin** | ${finalState?.entryMargin ? ((finalPnL / finalState.entryMargin) * 100).toFixed(2) : '0.00'}% |`,
     ``,
   ];
 
   if (finalLegs.length > 0) {
     report.push(`## Positions at Close`, ``);
-    report.push(`| Leg | Direction | Qty | Entry | LTP | P&L |`);
-    report.push(`|-----|:---------:|:---:|:----:|:---:|:---:|`);
+    report.push(`| Leg | Direction | Qty | Entry | Close | P&L |`);
+    report.push(`|-----|:---------:|:---:|:----:|:----:|:---:|`);
     for (const leg of finalLegs) {
-      report.push(`| ${leg.symbol} | ${leg.direction === 'BUY' ? '🟢 Long' : '🔴 Short'} | ${leg.qty} | ₹${leg.entry} | ₹${leg.ltp} | ${leg.pnl >= 0 ? '🟢' : '🔴'} ₹${leg.pnl.toFixed(2)} |`);
+      const pnlSign = leg.pnl >= 0 ? '🟢 +' : '🔴 -';
+      report.push(`| ${leg.symbol} | ${leg.direction === 'BUY' ? '🟢 Long' : '🔴 Short'} | ${leg.qty} | ₹${leg.entry.toFixed(2)} | ₹${leg.ltp.toFixed(2)} | ${pnlSign}₹${Math.abs(leg.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} |`);
     }
     report.push(``);
   }
 
   if (snapshots.length > 0) {
     report.push(`## P&L Timeline`, ``);
-    report.push(`| Time (IST) | Nifty Spot | P&L |`);
+    report.push(`| Time (IST) | ${config.titleName} Spot | P&L |`);
     report.push(`|------------|:----------:|:---:|`);
     for (const snap of snapshots) {
       const time = snap.ist.split(',')[1]?.trim() || snap.ist;
-      report.push(`| ${time} | ₹${snap.niftySpot.toFixed(2)} | ${snap.totalPnL >= 0 ? '🟢' : '🔴'} ₹${snap.totalPnL.toFixed(2)} |`);
+      const snapSpot = snap.spot || snap.niftySpot;
+      report.push(`| ${time} | ₹${snapSpot.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | ${snap.totalPnL >= 0 ? '🟢' : '🔴'} ₹${snap.totalPnL.toFixed(2)} |`);
     }
     report.push(``);
   }
 
   // Strategy notes
   report.push(`## Strategy Details`, ``);
-  report.push(`**Type:** Nifty Weekly Ratio Spread (Short 3, Long 1 on each side)`);
+  report.push(`**Type:** ${config.strategyType}`);
   report.push(`**Entry Time:** ~9:20 AM IST (market open on expiry day)`);
   report.push(`**Exit Time:** ~3:30 PM IST (market close square-off)`);
   report.push(`**Stop Loss:** 1% of utilized margin`);
   report.push(``);
   report.push(`## Notes`, ``);
+  
+  if (symbol === 'SENSEX') {
+    const changePct = ((spotChange / entrySpot) * 100).toFixed(2);
+    report.push(`Sensex moved from ₹${entrySpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} to ₹${finalSpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} (${changePct}% change) on the expiry day.`);
+  } else {
+    report.push(`Nifty moved from ₹${entrySpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} to ₹${finalSpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} on the expiry day.`);
+  }
+  
+  report.push(``);
   report.push(`_Auto-generated post-expiry analysis by Hermes_`);
 
   const reportContent = report.join('\n');
 
   // 7. Save report
   if (!fs.existsSync(REPORTS_DIR)) fs.mkdirSync(REPORTS_DIR, { recursive: true });
-  const reportFile = path.join(REPORTS_DIR, `expiry-${isoDate}.md`);
-  fs.writeFileSync(reportFile, reportContent);
-  console.log(`✅ Report saved: ${reportFile}`);
+  
+  // Save both prefix version and standard version to ensure compatibility and replace the requested file
+  const prefixReportFile = path.join(REPORTS_DIR, `expiry-${symbol.toLowerCase()}-${isoDate}.md`);
+  const standardReportFile = path.join(REPORTS_DIR, `expiry-${isoDate}.md`);
+  
+  fs.writeFileSync(prefixReportFile, reportContent);
+  fs.writeFileSync(standardReportFile, reportContent);
+  
+  console.log(`✅ Reports saved: ${prefixReportFile} and ${standardReportFile}`);
 
   // 8. Commit & push to GitHub
   try {
@@ -178,28 +270,23 @@ async function generateReport() {
     execSync('git add -A analysis/', { cwd: REPO_DIR, stdio: 'pipe' });
     execSync(`git commit -m "post-expiry: add analysis report for ${isoDate}"`, { cwd: REPO_DIR, stdio: 'pipe' });
     
-    // Push via HTTPS with token if available, otherwise let user handle
     try {
       execSync('git push', { cwd: REPO_DIR, stdio: 'pipe' });
       console.log('✅ Pushed to GitHub successfully');
     } catch (pushErr) {
-      // Try with token from env or gh CLI
       try {
         execSync('gh auth status', { cwd: REPO_DIR, stdio: 'pipe' });
         execSync('git push', { cwd: REPO_DIR, stdio: 'pipe' });
         console.log('✅ Pushed via gh auth');
       } catch (ghErr) {
-        console.log('⚠️  Push failed — you may need to auth gh CLI manually:');
-        console.log('   gh auth login');
-        console.log('   Then this will auto-push next expiry.');
-        console.log('   Commit is ready locally: git push');
+        console.log('⚠️  Push failed — commit is ready locally.');
       }
     }
   } catch (commitErr) {
     if (commitErr.message.includes('nothing to commit')) {
       console.log('ℹ️  Nothing new to commit');
     } else {
-      console.log('⚠️  Git error (non-critical):', commitErr.message);
+      console.log('⚠️  Git error:', commitErr.message);
     }
   }
 
