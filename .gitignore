@@ -30,9 +30,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Runtime data / state files
 .paper
 .kill
-data/scrip-master.json
-data/scrip-master-sensex.json
-data/positions.json
+data/
 
 # IDE / Editor configuration
 .idea/
