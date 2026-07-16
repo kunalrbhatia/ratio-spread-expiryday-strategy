@@ -255,14 +255,11 @@ async function generateReport() {
   // 7. Save report
   if (!fs.existsSync(REPORTS_DIR)) fs.mkdirSync(REPORTS_DIR, { recursive: true });
   
-  // Save both prefix version and standard version to ensure compatibility and replace the requested file
   const prefixReportFile = path.join(REPORTS_DIR, `expiry-${symbol.toLowerCase()}-${isoDate}.md`);
-  const standardReportFile = path.join(REPORTS_DIR, `expiry-${isoDate}.md`);
   
   fs.writeFileSync(prefixReportFile, reportContent);
-  fs.writeFileSync(standardReportFile, reportContent);
   
-  console.log(`✅ Reports saved: ${prefixReportFile} and ${standardReportFile}`);
+  console.log(`✅ Report saved: ${prefixReportFile}`);
 
   // 8. Commit & push to GitHub
   try {
