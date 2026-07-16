@@ -14,6 +14,11 @@ if (env.TELEGRAM_ENABLED && env.TELEGRAM_BOT_TOKEN) {
 }
 
 export const sendSlackNotification = async (message: string): Promise<boolean> => {
+  if (!env.SLACK_ENABLED) {
+    logger.warn('Slack notifications are disabled. Cannot send Slack notification.');
+    return false;
+  }
+
   if (!env.SLACK_WEBHOOK_URL) {
     logger.warn('Slack Webhook URL is missing. Cannot send Slack notification.');
     return false;
@@ -39,6 +44,11 @@ export const sendSlackNotification = async (message: string): Promise<boolean> =
 
 export const sendAlert = async (message: string): Promise<void> => {
   logger.info(`Notification Alert: ${message}`);
+
+  if (!env.TELEGRAM_ENABLED && !env.SLACK_ENABLED) {
+    return;
+  }
+
   let telegramSent = false;
 
   if (env.TELEGRAM_ENABLED && bot && env.TELEGRAM_CHAT_ID) {
