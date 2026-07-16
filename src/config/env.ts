@@ -12,7 +12,7 @@ export interface Env {
   USE_TELEGRAM: boolean;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
-  SLACK_ENABLED: boolean;
+  USE_SLACK: boolean;
   SLACK_WEBHOOK_URL?: string;
   SLACK_SIGNING_SECRET?: string;
   ENABLE_SENSEX_EXPIRY: boolean;
@@ -49,7 +49,7 @@ export const env: Env = {
   CLIENT_PIN: getEnvOrThrow('CLIENT_PIN'),
   CLIENT_TOTP_PIN: getEnvOrThrow('CLIENT_TOTP_PIN'),
   USE_TELEGRAM: getEnvBool('USE_TELEGRAM', 'true'),
-  SLACK_ENABLED: getEnvBool('SLACK_ENABLED', 'false'),
+  USE_SLACK: getEnvBool('USE_SLACK', 'false'),
   ENABLE_SENSEX_EXPIRY: getEnvBool('ENABLE_SENSEX_EXPIRY', 'true'),
 };
 
@@ -58,7 +58,7 @@ if (env.USE_TELEGRAM) {
   env.TELEGRAM_CHAT_ID = getEnvOrThrow('TELEGRAM_CHAT_ID');
 }
 
-if (env.SLACK_ENABLED) {
+if (env.USE_SLACK) {
   env.SLACK_WEBHOOK_URL = getEnvOrThrow('SLACK_WEBHOOK_URL');
 }
 if (process.env.SLACK_SIGNING_SECRET) {

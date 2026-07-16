@@ -14,7 +14,7 @@ if (env.USE_TELEGRAM && env.TELEGRAM_BOT_TOKEN) {
 }
 
 export const sendSlackNotification = async (message: string): Promise<boolean> => {
-  if (!env.SLACK_ENABLED) {
+  if (!env.USE_SLACK) {
     logger.warn('Slack notifications are disabled. Cannot send Slack notification.');
     return false;
   }
@@ -44,7 +44,7 @@ export const sendSlackNotification = async (message: string): Promise<boolean> =
 
 export const sendAlert = async (message: string): Promise<void> => {
   logger.info(`Notification Alert: ${message}`);
-  if (!env.USE_TELEGRAM && !env.SLACK_ENABLED) {
+  if (!env.USE_TELEGRAM && !env.USE_SLACK) {
     return;
   }
   let telegramSent = false;
@@ -62,7 +62,7 @@ export const sendAlert = async (message: string): Promise<void> => {
   }
 
   // Fallback to Slack if Telegram is disabled, failed, or not working
-  if (!telegramSent && env.SLACK_ENABLED) {
+  if (!telegramSent && env.USE_SLACK) {
     await sendSlackNotification(message);
   }
 };
