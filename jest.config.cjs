@@ -3,8 +3,8 @@ process.env.API_KEY = 'MOCK_API_KEY';
 process.env.CLIENT_CODE = 'MOCK_CLIENT_CODE';
 process.env.CLIENT_PIN = '1234';
 process.env.CLIENT_TOTP_PIN = 'MOCK_TOTP_SECRET';
-process.env.TELEGRAM_ENABLED = 'false';
-process.env.SLACK_ENABLED = 'false';
+process.env.USE_TELEGRAM = 'false';
+process.env.USE_SLACK = 'false';
 process.env.ENABLE_SENSEX_EXPIRY = 'true';
 
 /** @type {import('jest').Config} */
