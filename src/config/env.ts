@@ -9,7 +9,7 @@ export interface Env {
   CLIENT_CODE: string;
   CLIENT_PIN: string;
   CLIENT_TOTP_PIN: string;
-  TELEGRAM_ENABLED: boolean;
+  USE_TELEGRAM: boolean;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   SLACK_ENABLED: boolean;
@@ -48,12 +48,12 @@ export const env: Env = {
   CLIENT_CODE: getEnvOrThrow('CLIENT_CODE'),
   CLIENT_PIN: getEnvOrThrow('CLIENT_PIN'),
   CLIENT_TOTP_PIN: getEnvOrThrow('CLIENT_TOTP_PIN'),
-  TELEGRAM_ENABLED: getEnvBool('TELEGRAM_ENABLED', 'true'),
+  USE_TELEGRAM: getEnvBool('USE_TELEGRAM', 'true'),
   SLACK_ENABLED: getEnvBool('SLACK_ENABLED', 'false'),
   ENABLE_SENSEX_EXPIRY: getEnvBool('ENABLE_SENSEX_EXPIRY', 'true'),
 };
 
-if (env.TELEGRAM_ENABLED) {
+if (env.USE_TELEGRAM) {
   env.TELEGRAM_BOT_TOKEN = getEnvOrThrow('TELEGRAM_BOT_TOKEN');
   env.TELEGRAM_CHAT_ID = getEnvOrThrow('TELEGRAM_CHAT_ID');
 }

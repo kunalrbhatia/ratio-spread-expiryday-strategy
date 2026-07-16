@@ -1,6 +1,6 @@
 # Nifty Option Ratio Spread Expiry Strategy
 
-An automated weekly options trading strategy for Nifty 50 options. The strategy runs exclusively on expiry days (normally Tuesdays, or Mondays if Tuesday is an NSE trading holiday), entering positions at 09:20 AM IST and managing risk dynamically using real-time WebSocket pricing. Alerting notifications can be sent to Telegram and/or Slack, or fully disabled by setting both `TELEGRAM_ENABLED` and `SLACK_ENABLED` flags to `false`.
+An automated weekly options trading strategy for Nifty 50 options. The strategy runs exclusively on expiry days (normally Tuesdays, or Mondays if Tuesday is an NSE trading holiday), entering positions at 09:20 AM IST and managing risk dynamically using real-time WebSocket pricing. Alerting notifications can be sent to Telegram and/or Slack, or fully disabled by setting both `USE_TELEGRAM` and `SLACK_ENABLED` flags to `false`.
 
 ## Strategy Logic
 
@@ -38,7 +38,7 @@ CLIENT_PIN=your_client_pin
 CLIENT_TOTP_PIN=your_totp_seed_secret
 
 # Telegram Bot (Primary)
-TELEGRAM_ENABLED=true
+USE_TELEGRAM=true
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 

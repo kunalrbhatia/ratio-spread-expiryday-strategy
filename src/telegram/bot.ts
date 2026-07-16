@@ -17,7 +17,7 @@ import { getOptionLtps } from '../helpers/marketData.js';
 export let telegramBot: Telegraf | null = null;
 
 export const startTelegramBot = () => {
-  if (!env.TELEGRAM_ENABLED || !env.TELEGRAM_BOT_TOKEN) {
+  if (!env.USE_TELEGRAM || !env.TELEGRAM_BOT_TOKEN) {
     logger.warn('Telegram Bot is disabled or credentials missing. Skipping startup.');
     return;
   }
