@@ -1,15 +1,6 @@
 {
   "active": false,
-  "legs": [
-    {
-      "symbol": "NIFTY26FEB2625000CE",
-      "token": "35002",
-      "entryPremium": 100,
-      "qty": 65,
-      "type": "CE",
-      "direction": "BUY"
-    }
-  ],
-  "entryMargin": 300000,
-  "stopLoss": 3000
+  "legs": [],
+  "entryMargin": 0,
+  "stopLoss": 0
 }

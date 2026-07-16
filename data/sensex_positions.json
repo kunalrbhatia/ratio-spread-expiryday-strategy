@@ -1,39 +1,6 @@
 {
-  "active": true,
-  "legs": [
-    {
-      "symbol": "SENSEX2671677400CE",
-      "token": "827798",
-      "entryPremium": 140,
-      "qty": 20,
-      "type": "CE",
-      "direction": "BUY"
-    },
-    {
-      "symbol": "SENSEX2671677400PE",
-      "token": "829489",
-      "entryPremium": 160,
-      "qty": 20,
-      "type": "PE",
-      "direction": "BUY"
-    },
-    {
-      "symbol": "SENSEX2671677800CE",
-      "token": "824353",
-      "entryPremium": 46.5,
-      "qty": 60,
-      "type": "CE",
-      "direction": "SELL"
-    },
-    {
-      "symbol": "SENSEX2671677100PE",
-      "token": "826524",
-      "entryPremium": 53.5,
-      "qty": 60,
-      "type": "PE",
-      "direction": "SELL"
-    }
-  ],
-  "entryMargin": 350000,
-  "stopLoss": 3500
+  "active": false,
+  "legs": [],
+  "entryMargin": 0,
+  "stopLoss": 0
 }
