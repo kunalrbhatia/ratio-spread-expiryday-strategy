@@ -102,12 +102,12 @@ The following endpoint patches are applied in `src/helpers/`:
 
 ## Post-Expiry Analysis
 
-On each expiry day (Tuesday), the strategy runs an automated analysis pipeline:
+On each expiry day (Tuesdays for Nifty, Thursdays for Sensex), the strategy runs an automated analysis pipeline:
 
-1. **Snapshot Collector** — every 15 min (9:15 AM–3:30 PM IST) captures P&L snapshots to `analysis/snapshots/`
-2. **Post-Close Report** — at 3:35 PM IST, generates a markdown report in `analysis/reports/` and opens a PR
+1. **Snapshot Collector** — every 15 min (9:15 AM–3:30 PM IST) captures P&L snapshots to `analysis/snapshots/` dynamically detecting active positions across Nifty and Sensex.
+2. **Post-Close Report** — at 3:35 PM IST, generates a markdown report in `analysis/reports/` named as `expiry-[symbol]-[date].md` and opens a PR.
 
-Reports include: entry/exit Nifty spot, leg-wise P&L, P&L timeline, and return metrics.
+Reports include: entry/exit spot prices, leg-wise P&L, P&L timeline, and return metrics.
 
 ## Development Rules
 
