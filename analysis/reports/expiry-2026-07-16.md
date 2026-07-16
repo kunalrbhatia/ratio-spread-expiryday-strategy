@@ -6,12 +6,12 @@
 |--------|-------|
 | **Index** | Sensex |
 | **Expiry Date** | 16-Jul-2026 |
-| **Spot Entry** | ₹77,186.87 |
+| **Spot Entry** | ₹77,437.23 |
 | **Spot Close** | ₹77,186.87 |
-| **Spot Change** | +0.00 pts |
+| **Spot Change** | -250.36 pts |
 | **Final P&L** | 🟢 +₹4,219.00 |
-| **Max P&L** | +₹4,219.00 |
-| **Min P&L** | +₹4,219.00 |
+| **Max P&L** | +₹4,219.00 (at 03:30:00 PM) |
+| **Min P&L** | +₹0.00 (at 09:20:00 AM) |
 | **Entry Margin** | ₹3,50,000 |
 | **Return on Margin** | 1.21% |
 
@@ -24,6 +24,14 @@
 | SENSEX2671677800CE | 🔴 Short | 60 | ₹46.50 | ₹0.05 | 🟢 +₹2,787.00 |
 | SENSEX2671677100PE | 🔴 Short | 60 | ₹53.50 | ₹0.05 | 🟢 +₹3,207.00 |
 
+## P&L Timeline
+
+| Time (IST) | Sensex Spot | P&L |
+|------------|:----------:|:---:|
+| 09:20:00 AM | ₹77,437.23 | 🟢 ₹0.00 |
+| 01:30:00 PM | ₹77,300.00 | 🟢 ₹2100.00 |
+| 03:30:00 PM | ₹77,186.87 | 🟢 ₹4219.00 |
+
 ## Strategy Details
 
 **Type:** Sensex Weekly Ratio Spread (Short 3, Long 1 on each side)
@@ -33,6 +41,6 @@
 
 ## Notes
 
-Sensex moved from ₹77,186.87 to ₹77,186.87 (0.00% change) on the expiry day.
+Sensex moved from ₹77,437.23 to ₹77,186.87 (-0.32% change) on the expiry day.
 
 _Auto-generated post-expiry analysis by Hermes_
