@@ -85,12 +85,7 @@ class PositionStore {
   }
 
   public clear() {
-    this.state = {
-      active: false,
-      legs: [],
-      entryMargin: 0,
-      stopLoss: 0,
-    };
+    this.state.active = false;
     this.save();
   }
 }

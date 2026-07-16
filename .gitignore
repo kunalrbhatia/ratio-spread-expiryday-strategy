@@ -31,6 +31,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .paper
 .kill
 data/scrip-master.json
+data/scrip-master-sensex.json
 data/positions.json
 
 # IDE / Editor configuration
