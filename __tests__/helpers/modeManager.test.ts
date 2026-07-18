@@ -4,6 +4,8 @@ import {
   setPaperMode,
   isKillSwitchActive,
   setKillSwitch,
+  isPanicSwitchActive,
+  setPanicSwitch,
 } from '../../src/helpers/modeManager.js';
 import fs from 'fs';
 
@@ -55,6 +57,23 @@ describe('modeManager helper', () => {
 
     existsSpy.mockReturnValueOnce(true);
     setKillSwitch(false);
+    expect(unlinkSpy).toHaveBeenCalled();
+  });
+
+  it('should return correct panic switch active state based on file existence', () => {
+    existsSpy.mockReturnValueOnce(true);
+    expect(isPanicSwitchActive()).toBe(true);
+
+    existsSpy.mockReturnValueOnce(false);
+    expect(isPanicSwitchActive()).toBe(false);
+  });
+
+  it('should write/unlink panic file correctly', () => {
+    setPanicSwitch(true);
+    expect(writeSpy).toHaveBeenCalled();
+
+    existsSpy.mockReturnValueOnce(true);
+    setPanicSwitch(false);
     expect(unlinkSpy).toHaveBeenCalled();
   });
 });

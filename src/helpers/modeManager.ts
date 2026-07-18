@@ -32,3 +32,19 @@ export const setKillSwitch = (on: boolean): void => {
     }
   }
 };
+
+const panicFilePath = path.join(process.cwd(), '.panic');
+
+export const isPanicSwitchActive = (): boolean => {
+  return fs.existsSync(panicFilePath);
+};
+
+export const setPanicSwitch = (on: boolean): void => {
+  if (on) {
+    fs.writeFileSync(panicFilePath, 'PANIC', 'utf-8');
+  } else {
+    if (fs.existsSync(panicFilePath)) {
+      fs.unlinkSync(panicFilePath);
+    }
+  }
+};
