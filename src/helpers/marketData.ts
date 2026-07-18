@@ -54,8 +54,10 @@ export const findATMContracts = (
   let pe: ScripItem | null = null;
 
   for (const item of scrips) {
-    // Normalise strike representation in SmartAPI headers
-    const itemStrike = parseFloat(item.strike) / (parseFloat(item.strike) > 100000 ? 100 : 1);
+    // Normalise strike representation in SmartAPI headers.
+    // According to Angel One API conventions, OPTIDX strikes in both NFO and BFO segments
+    // are represented in paise (multiplied by 100), requiring a fixed divisor of 100.
+    const itemStrike = parseFloat(item.strike) / 100;
     if (Math.round(itemStrike) === atmStrike) {
       if (item.symbol.endsWith('CE')) {
         ce = item;

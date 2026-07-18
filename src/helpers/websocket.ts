@@ -19,6 +19,7 @@ class SmartStreamClient {
   private mockInterval: NodeJS.Timeout | null = null;
   private callback: TickCallback | null = null;
   private subscribedTokens: Set<string> = new Set();
+  private reconnectAttempts = 0;
 
   public connect(callback: TickCallback) {
     this.callback = callback;
@@ -57,6 +58,7 @@ class SmartStreamClient {
       this.ws.on('open', () => {
         logger.info('SmartStream WebSocket connection established successfully.');
         this.isConnected = true;
+        this.reconnectAttempts = 0;
         // Re-subscribe if we had previous tokens
         // Since we don't store the symbol for cached tokens, we can check where they belong
         if (this.subscribedTokens.size > 0) {
@@ -88,9 +90,9 @@ class SmartStreamClient {
           if (Buffer.isBuffer(data)) {
             const type = data.readUInt8(0);
             if (type === 1 || type === 3) {
-              const tokenBuffer = data.slice(1, 26);
+              const tokenBuffer = data.slice(2, 27);
               const token = tokenBuffer.toString('utf8').replace(/\0/g, '').trim();
-              const ltpRaw = data.readInt32LE(26);
+              const ltpRaw = Number(data.readBigInt64LE(43));
               const ltp = ltpRaw / 100;
 
               if (token && ltp > 0) {
@@ -109,9 +111,32 @@ class SmartStreamClient {
         logger.error(`SmartStream WebSocket error: ${err.message}`);
       });
 
-      this.ws.on('close', () => {
-        logger.warn('SmartStream WebSocket connection closed. Attempting reconnect in 5s...');
+      this.ws.on('close', async () => {
         this.isConnected = false;
+        this.reconnectAttempts++;
+        logger.warn(
+          `SmartStream WebSocket connection closed. Attempting reconnect in 5s... (Attempt: ${this.reconnectAttempts})`,
+        );
+
+        if (this.reconnectAttempts >= 3) {
+          logger.warn(`WebSocket reconnect failed 3 times. Re-authenticating with SmartAPI...`);
+          try {
+            const { loginToSmartAPI } = await import('./login.js');
+            const loginSuccess = await loginToSmartAPI();
+            if (loginSuccess) {
+              logger.info(`Re-authentication successful.`);
+            } else {
+              logger.error(`Re-authentication failed.`);
+              const { sendAlert } = await import('../notifier.js');
+              await sendAlert(
+                `🚨 <b>SmartStream WebSocket Reconnect Failed!</b>\nFailed to re-authenticate session after 3 close events. Price monitoring might be offline.`,
+              );
+            }
+          } catch (err: any) {
+            logger.error(`Error during WebSocket re-authentication: ${err.message}`);
+          }
+        }
+
         setTimeout(() => this.connect(callback), 5000);
       });
     } catch (error: any) {

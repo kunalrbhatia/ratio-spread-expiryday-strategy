@@ -1,4 +1,5 @@
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+import os from 'os';
 import { logger } from './logger.js';
 import { sessionStore } from '../store/sessionStore.js';
 import { env } from '../config/env.js';
@@ -6,6 +7,52 @@ import { env } from '../config/env.js';
 let lastRequestTime = 0;
 const MIN_GAP_MS = 1000;
 let queueChain: Promise<any> = Promise.resolve();
+
+let cachedPublicIp = '106.193.147.98'; // fallback
+let cachedLocalIp = '192.168.1.1'; // fallback
+let cachedMacAddress = 'fe80::216:3eff:fe0f:1105'; // fallback
+let ipFetched = false;
+
+// Populate local network interface info immediately on startup
+const getLocalNetworkInfo = () => {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      const iface = interfaces[name];
+      if (!iface) continue;
+      for (const alias of iface) {
+        if (alias.family === 'IPv4' && !alias.internal) {
+          cachedLocalIp = alias.address;
+          if (alias.mac && alias.mac !== '00:00:00:00:00:00') {
+            cachedMacAddress = alias.mac;
+          }
+          return;
+        }
+      }
+    }
+  } catch (err: any) {
+    logger.warn(`Failed to fetch local network interfaces: ${err.message}`);
+  }
+};
+getLocalNetworkInfo();
+
+// Fetch public IP dynamically
+const fetchPublicIp = async (): Promise<string> => {
+  if (ipFetched) return cachedPublicIp;
+  try {
+    const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
+    if (response.data && response.data.ip) {
+      cachedPublicIp = response.data.ip;
+      ipFetched = true;
+      logger.info(`Resolved real VM public IP: ${cachedPublicIp}`);
+    }
+  } catch (err: any) {
+    logger.warn(
+      `Failed to fetch dynamic public IP: ${err.message}. Using fallback: ${cachedPublicIp}`,
+    );
+  }
+  return cachedPublicIp;
+};
 
 // Synchronizes and throttles all API calls to ensure at least 1000ms gap between each start
 const throttle = async (): Promise<void> => {
@@ -30,38 +77,50 @@ const executeWithQueue = <T>(requestFn: () => Promise<T>): Promise<T> => {
   return promise;
 };
 
-// Retry with exponential backoff
-const requestWithRetry = async <T>(
-  requestFn: () => Promise<T>,
-  retries = 3,
-  delay = 1000,
-): Promise<T> => {
-  try {
-    return await requestFn();
-  } catch (error: any) {
-    if (retries > 0) {
-      logger.warn(
-        `API request failed: ${error.message}. Retrying in ${delay}ms... (Retries left: ${retries})`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return requestWithRetry(requestFn, retries - 1, delay * 2);
+// Retry with exponential backoff sequence: 2s, 4s, 8s, 16s, 24s (capped at 24s)
+export const requestWithRetry = async <T>(requestFn: () => Promise<T>): Promise<T> => {
+  const DELAY_SEQUENCE = [2000, 4000, 8000, 16000, 24000];
+  let attempt = 1;
+  const maxAttempts = 5;
+
+  while (true) {
+    try {
+      return await requestFn();
+    } catch (error: any) {
+      if (attempt < maxAttempts) {
+        const delay = DELAY_SEQUENCE[attempt - 1] || 24000;
+        logger.warn(
+          `API request failed: ${error.message}. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxAttempts})`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        attempt++;
+      } else {
+        logger.error(
+          `API request failed after ${maxAttempts} attempts. Propagating final error: ${error.message}`,
+        );
+        throw error;
+      }
     }
-    throw error;
   }
 };
 
 // Generic axios request wrapper
-export const apiRequest = async <T = any>(config: AxiosRequestConfig): Promise<T> => {
+export const apiRequest = async <T = any>(
+  config: AxiosRequestConfig,
+  skipRetry = false,
+): Promise<T> => {
   const executeCall = async (): Promise<T> => {
     const session = sessionStore.getSession();
+    const publicIp = await fetchPublicIp();
+
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
       'X-UserType': 'USER',
       'X-SourceID': 'WEB',
-      'X-ClientLocalIP': '192.168.1.1',
-      'X-ClientPublicIP': '106.193.147.98',
-      'X-MACaddress': 'fe80::216:3eff:fe0f:1105',
+      'X-ClientLocalIP': cachedLocalIp,
+      'X-ClientPublicIP': publicIp,
+      'X-MACaddress': cachedMacAddress,
       'X-PrivateKey': env.API_KEY,
       ...(config.headers || {}),
     } as any;
@@ -84,5 +143,5 @@ export const apiRequest = async <T = any>(config: AxiosRequestConfig): Promise<T
     return data;
   };
 
-  return executeWithQueue(() => requestWithRetry(executeCall));
+  return executeWithQueue(() => (skipRetry ? executeCall() : requestWithRetry(executeCall)));
 };

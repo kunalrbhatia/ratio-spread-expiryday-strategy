@@ -84,8 +84,21 @@ class PositionStore {
     }
   }
 
+  public updateLegs(legs: OptionLeg[]) {
+    this.state.legs = legs;
+    if (legs.length === 0) {
+      this.state.active = false;
+    }
+    this.save();
+  }
+
   public clear() {
-    this.state.active = false;
+    this.state = {
+      active: false,
+      legs: [],
+      entryMargin: 0,
+      stopLoss: 0,
+    };
     this.save();
   }
 }

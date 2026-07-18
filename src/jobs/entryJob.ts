@@ -57,10 +57,30 @@ export const executeExpiryStrategyEntry = async (
     });
     logger.info(`${symbol} ATM PE Order ID: ${peBuyOrderId}`);
 
-    // 4. Retrieve execute prices
-    const fillPrices = await getOptionLtps([atmCE.token, atmPE.token], symbol);
-    const pCEBuy = fillPrices.get(atmCE.token) || 100; // fallback if api returns 0
-    const pPEBuy = fillPrices.get(atmPE.token) || 100;
+    // 4. Retrieve execute prices with retries
+    let fillPrices = new Map<string, number>();
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        fillPrices = await getOptionLtps([atmCE.token, atmPE.token], symbol);
+        if (fillPrices.get(atmCE.token) && fillPrices.get(atmPE.token)) {
+          break;
+        }
+      } catch (err: any) {
+        logger.warn(`Attempt ${attempt} to retrieve option LTPs failed: ${err.message}`);
+      }
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    const pCEBuy = fillPrices.get(atmCE.token);
+    const pPEBuy = fillPrices.get(atmPE.token);
+
+    if (!pCEBuy || !pPEBuy) {
+      throw new Error(
+        `Failed to retrieve valid LTPs for ATM CE (${atmCE.token}) or PE (${atmPE.token}) after retries. Aborting entry.`,
+      );
+    }
 
     logger.info(`${symbol} ATM CE Entry Premium: ₹${pCEBuy}`);
     logger.info(`${symbol} ATM PE Entry Premium: ₹${pPEBuy}`);

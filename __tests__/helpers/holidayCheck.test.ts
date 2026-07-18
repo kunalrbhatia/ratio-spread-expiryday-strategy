@@ -4,6 +4,7 @@ import {
   isNSEHoliday,
   isExpiryDay,
   isExpiryDayForSymbol,
+  extractExpiryFromSymbol,
 } from '../../src/helpers/holidayCheck.js';
 
 describe('holidayCheck helper', () => {
@@ -78,6 +79,39 @@ describe('holidayCheck helper', () => {
       } finally {
         env.ENABLE_SENSEX_EXPIRY = true;
       }
+    });
+  });
+
+  describe('extractExpiryFromSymbol', () => {
+    it('should extract correct date from weekly SENSEX options', () => {
+      const date = extractExpiryFromSymbol('SENSEX2671677400CE');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCFullYear()).toBe(2026);
+      expect(date?.getUTCMonth()).toBe(6); // July is 6 (0-indexed)
+      expect(date?.getUTCDate()).toBe(16);
+    });
+
+    it('should extract correct date from weekly NIFTY options', () => {
+      const date = extractExpiryFromSymbol('NIFTY2672124300CE');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCFullYear()).toBe(2026);
+      expect(date?.getUTCMonth()).toBe(6); // July is 6 (0-indexed)
+      expect(date?.getUTCDate()).toBe(21);
+    });
+
+    it('should extract correct date from monthly options (last Thursday)', () => {
+      const date = extractExpiryFromSymbol('NIFTY26JUL24300CE');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCFullYear()).toBe(2026);
+      expect(date?.getUTCMonth()).toBe(6); // July
+      expect(date?.getUTCDay()).toBe(4); // Thursday
+      // Last Thursday of July 2026 is July 30th
+      expect(date?.getUTCDate()).toBe(30);
+    });
+
+    it('should return null for invalid option symbols', () => {
+      expect(extractExpiryFromSymbol('INVALID_SYMBOL')).toBeNull();
+      expect(extractExpiryFromSymbol('NIFTY26JL24300CE')).toBeNull(); // invalid month code
     });
   });
 });

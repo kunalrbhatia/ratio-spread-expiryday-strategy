@@ -99,6 +99,12 @@ The following endpoint patches are applied in `src/helpers/`:
 | WS auth: `Bearer` prefix rejected | Send raw JWT token in `Authorization` header | `websocket.ts` |
 | WS SSL cert validation | Set `rejectUnauthorized: false` | `websocket.ts` |
 | Margin API returns 400 `"Order type is required"` | Add `orderType: 'MARKET'` to each margin leg; read `totalMarginRequired` from response | `orders.ts`, `entryJob.ts` |
+| WebSocket binary parser offset | Read token from bytes 2–27, LTP from byte 43 as an 8-byte signed long | `websocket.ts` |
+| Duplicate orders on retry | Exclude placeOptionOrder from generic retry, use exponential backoff for other requests | `api.ts`, `orders.ts` |
+| OS Timezone dependency | Construct UTC Date re-anchored to India timezone to calculate expiry days | `holidayCheck.ts`, `ecosystem.config.cjs` |
+| Stale position storage | Reset legs, entryMargin, and stopLoss fields to empty/zero upon clearing | `positionStore.ts` |
+| Hardcoded request headers | Dynamic resolution of local IP, MAC address, and public IP on startup | `api.ts` |
+| Option strike unit | Normalise strikes with a fixed divisor of 100 per API conventions | `marketData.ts` |
 
 ## Post-Expiry Analysis
 

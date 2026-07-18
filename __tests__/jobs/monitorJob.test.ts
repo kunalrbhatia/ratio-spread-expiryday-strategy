@@ -104,6 +104,32 @@ describe('monitorJob', () => {
       expect(clearSpy).toHaveBeenCalled();
       expect(sendAlertSpy).toHaveBeenCalled();
     });
+
+    it('should not clear state and should update store with only failed legs if some exit orders fail', async () => {
+      jest.spyOn(positionStore, 'getPositions').mockReturnValue({
+        active: true,
+        legs,
+        entryMargin: 350000,
+        stopLoss: 3500,
+      });
+      const clearSpy = jest.spyOn(positionStore, 'clear').mockImplementation(() => {});
+      const updateLegsSpy = jest.spyOn(positionStore, 'updateLegs').mockImplementation(() => {});
+
+      // Mock placeOptionOrder to fail for T2 (PE_BUY)
+      placeOrderSpy.mockImplementation(({ symboltoken }: any) => {
+        if (symboltoken === 'T2') {
+          return Promise.reject(new Error('Network error'));
+        }
+        return Promise.resolve('MOCK-ORD-123');
+      });
+
+      const success = await exitAllPositions('Test exit');
+      expect(success).toBe(true);
+      expect(placeOrderSpy).toHaveBeenCalledTimes(4);
+      expect(clearSpy).not.toHaveBeenCalled();
+      expect(updateLegsSpy).toHaveBeenCalledWith([legs[1]]); // only T2 failed
+      expect(sendAlertSpy).toHaveBeenCalled();
+    });
   });
 
   describe('handleIncomingTick', () => {
