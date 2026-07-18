@@ -3,6 +3,8 @@ import axios from 'axios';
 import { env } from './config/env.js';
 import { logger } from './helpers/logger.js';
 
+import { requestWithRetry } from './helpers/api.js';
+
 let bot: Telegraf | null = null;
 
 if (env.USE_TELEGRAM && env.TELEGRAM_BOT_TOKEN) {
@@ -31,9 +33,11 @@ export const sendSlackNotification = async (message: string): Promise<boolean> =
       icon_emoji: ':chart_with_upwards_trend:',
     };
 
-    await axios.post(env.SLACK_WEBHOOK_URL, payload, {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    await requestWithRetry(() =>
+      axios.post(env.SLACK_WEBHOOK_URL!, payload, {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
     logger.info(`Slack alert sent successfully.`);
     return true;
   } catch (err: any) {
@@ -51,9 +55,11 @@ export const sendAlert = async (message: string): Promise<void> => {
 
   if (env.USE_TELEGRAM && bot && env.TELEGRAM_CHAT_ID) {
     try {
-      await bot.telegram.sendMessage(env.TELEGRAM_CHAT_ID, message, {
-        parse_mode: 'HTML',
-      });
+      await requestWithRetry(() =>
+        bot!.telegram.sendMessage(env.TELEGRAM_CHAT_ID!, message, {
+          parse_mode: 'HTML',
+        }),
+      );
       telegramSent = true;
       logger.info('Telegram alert sent successfully.');
     } catch (err: any) {

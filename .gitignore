@@ -42,3 +42,8 @@ data/
 *.sw?
 .DS_Store
 settings.json
+
+
+tools/
+logs*
+scratch/

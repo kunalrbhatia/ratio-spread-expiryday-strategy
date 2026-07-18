@@ -35,25 +35,28 @@ export const placeOptionOrder = async (params: OrderParams): Promise<string> => 
   }
 
   try {
-    const response = await apiRequest({
-      method: 'POST',
-      url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/secure/angelbroking/order/v1/placeOrder`,
-      data: {
-        variety: 'NORMAL',
-        tradingsymbol: params.tradingsymbol,
-        symboltoken: params.symboltoken,
-        transactiontype: params.transactiontype,
-        exchange: params.exchange,
-        ordertype: 'MARKET',
-        producttype: 'CARRYFORWARD',
-        duration: 'DAY',
-        price: '0',
-        squareoff: '0',
-        stoploss: '0',
-        trailingstoploss: '0',
-        quantity: params.quantity.toString(),
+    const response = await apiRequest(
+      {
+        method: 'POST',
+        url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/secure/angelbroking/order/v1/placeOrder`,
+        data: {
+          variety: 'NORMAL',
+          tradingsymbol: params.tradingsymbol,
+          symboltoken: params.symboltoken,
+          transactiontype: params.transactiontype,
+          exchange: params.exchange,
+          ordertype: 'MARKET',
+          producttype: 'CARRYFORWARD',
+          duration: 'DAY',
+          price: '0',
+          squareoff: '0',
+          stoploss: '0',
+          trailingstoploss: '0',
+          quantity: params.quantity.toString(),
+        },
       },
-    });
+      true, // skipRetry
+    );
 
     if (response.status === true && response.data) {
       const orderId = response.data.orderid;
@@ -79,25 +82,47 @@ export const fetchUtilizedMargin = async (legs: MarginLeg[]): Promise<number> =>
     return mockMargin;
   }
 
-  try {
-    const response = await apiRequest({
-      method: 'POST',
-      url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/secure/angelbroking/margin/v1/batch`,
-      data: {
-        positions: legs,
-      },
-    });
+  let attempt = 1;
+  while (attempt <= 3) {
+    try {
+      const response = await apiRequest(
+        {
+          method: 'POST',
+          url: `${CONSTANTS.ANGEL_ONE_BASE_URL}/rest/secure/angelbroking/margin/v1/batch`,
+          data: {
+            positions: legs,
+          },
+        },
+        true, // skipRetry
+      );
 
-    if (response.status === true && response.data) {
-      const margin = parseFloat(response.data.totalMarginRequired || '0');
-      logger.info(`Fetched utilized margin from SmartAPI: ₹${margin}`);
-      return margin > 0 ? margin : 350000; // fallback if api returns 0
+      if (response.status === true && response.data) {
+        const margin = parseFloat(response.data.totalMarginRequired || '0');
+        if (margin > 0) {
+          logger.info(`Fetched utilized margin from SmartAPI: ₹${margin}`);
+          return margin;
+        }
+      }
+      throw new Error(response?.message || 'Failed to fetch batch margin');
+    } catch (error: any) {
+      logger.warn(`Attempt ${attempt} to fetch utilized margin failed: ${error.message}`);
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      attempt++;
     }
-    throw new Error(response.message || 'Failed to fetch batch margin');
-  } catch (error: any) {
-    logger.error(`Error in fetchUtilizedMargin: ${error.message}. Using fallback ₹3,50,000.`);
-    return 350000;
   }
+
+  logger.error(`Error in fetchUtilizedMargin after retries. Using fallback ₹3,50,000.`);
+  try {
+    const { sendAlert } = await import('../notifier.js');
+    await sendAlert(
+      `⚠️ <b>Utilized Margin Fetch Failed!</b> Using fallback margin of ₹3,50,000. Stop-loss threshold may be inaccurate.`,
+    );
+  } catch (alertError: any) {
+    logger.error(`Failed to send fallback margin alert: ${alertError.message}`);
+  }
+  return 350000;
 };
 
 export const ordersHelper = {

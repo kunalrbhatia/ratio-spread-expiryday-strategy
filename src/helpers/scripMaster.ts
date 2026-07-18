@@ -4,6 +4,8 @@ import path from 'path';
 import { logger } from './logger.js';
 import { CONSTANTS } from './constants.js';
 
+import { requestWithRetry } from './api.js';
+
 export interface ScripItem {
   token: string;
   symbol: string;
@@ -62,11 +64,13 @@ export const downloadAndCacheScripMaster = async (
 ): Promise<boolean> => {
   try {
     logger.info(`Downloading Angel One scrip master header for ${symbol}...`);
-    const response = await axios({
-      method: 'GET',
-      url: CONSTANTS.SCRIP_MASTER_URL,
-      responseType: 'json',
-    });
+    const response = await requestWithRetry(() =>
+      axios({
+        method: 'GET',
+        url: CONSTANTS.SCRIP_MASTER_URL,
+        responseType: 'json',
+      }),
+    );
 
     if (!Array.isArray(response.data)) {
       throw new Error('Scrip master response is not an array');

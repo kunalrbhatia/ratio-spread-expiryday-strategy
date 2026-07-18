@@ -47,12 +47,9 @@ export const exitAllPositions = async (
       return false;
     }
 
-    const tokens = positions.legs.map((leg) => leg.token);
-
-    // Unsubscribe from websocket for this index's tokens
-    smartStream.unsubscribe(tokens, symbol);
-
     const config = INDEX_CONFIGS[symbol];
+    const succeededLegs: OptionLeg[] = [];
+    const failedLegs: OptionLeg[] = [];
 
     // Execute exit orders for each leg
     for (const leg of positions.legs) {
@@ -65,16 +62,33 @@ export const exitAllPositions = async (
           quantity: leg.qty,
           exchange: config.optionExchange,
         });
+        succeededLegs.push(leg);
+        smartStream.unsubscribe([leg.token], symbol);
       } catch (err: any) {
         logger.error(`Error closing leg ${leg.symbol}: ${err.message}`);
+        failedLegs.push(leg);
+
+        const emergencyMsg = `
+⚠️ <b>MANUAL INTERVENTION NEEDED</b>
+---------------------------------
+<b>Failed to close ${symbol} leg:</b> ${leg.symbol} (${leg.token})
+<b>Direction:</b> ${leg.direction} -> ${exitTxType}
+<b>Error:</b> ${err.message}
+Please close this position manually at the broker immediately!
+`;
+        await notifierHelper.sendAlert(emergencyMsg);
       }
     }
 
     // Calculate final P&L
     const finalPnL = calculateCurrentPnL(positions.legs);
 
-    // Clear state
-    store.clear();
+    // Clear state or update with failed legs
+    if (failedLegs.length === 0) {
+      store.clear();
+    } else {
+      store.updateLegs(failedLegs);
+    }
 
     const alertMessage = `
 🚨 <b>${symbol} Position Exit Triggered</b>
