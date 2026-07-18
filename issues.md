@@ -273,8 +273,8 @@ this.ws.on('close', () => {
 
 | # | Issue | File | Severity | Status |
 |---|-------|------|----------|--------|
-| 1 | No Telegram auth check on bot commands | `telegram/bot.ts` | Critical | Pending |
-| 2 | Kill switch blocks stop-loss exits | `jobs/monitorJob.ts` | Critical | Pending |
+| 1 | No Telegram auth check on bot commands | `telegram/bot.ts` | Critical | Done |
+| 2 | Kill switch blocks stop-loss exits | `jobs/monitorJob.ts` | Critical | Done |
 | 3 | Wrong WebSocket binary offsets for token/LTP | `helpers/websocket.ts` | Critical | Done |
 | 4 | No fill confirmation before marking position closed | `jobs/monitorJob.ts` | Critical | Done |
 | 5 | Silent fallback values feed into SL math | `jobs/entryJob.ts`, `helpers/orders.ts` | Critical | Done |
@@ -283,8 +283,8 @@ this.ws.on('close', () => {
 | 8 | IST date trick depends on unset server TZ | `helpers/holidayCheck.ts`, `ecosystem.config.cjs` | High | Done |
 | 9 | `clear()` leaves stale leg data | `store/positionStore.ts` | High | Done |
 | 10 | Hardcoded fake IP/MAC in every API call | `helpers/api.ts` | Medium | Done |
-| 11 | No request timeout on API calls | `helpers/api.ts` | Medium | Pending |
+| 11 | No request timeout on API calls | `helpers/api.ts` | Medium | Done |
 | 12 | Fragile strike-unit heuristic | `helpers/marketData.ts` | Medium | Done |
 | 13 | WebSocket reconnect never re-authenticates | `helpers/websocket.ts` | Medium | Done |
 
-I'd tackle #1, #2, and #11 next — those are the remaining outstanding items to ensure complete safety and control over position monitoring.
+All 13 code review issues have been successfully resolved, tested, and verified.

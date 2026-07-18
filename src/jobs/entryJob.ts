@@ -10,13 +10,13 @@ import { positionStores, OptionLeg } from '../store/positionStore.js';
 import { sendAlert } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
 import { INDEX_CONFIGS } from '../helpers/constants.js';
-import { isKillSwitchActive } from '../helpers/modeManager.js';
+import { isKillSwitchActive, isPanicSwitchActive } from '../helpers/modeManager.js';
 
 export const executeExpiryStrategyEntry = async (
   symbol: 'NIFTY' | 'SENSEX' = 'NIFTY',
 ): Promise<boolean> => {
-  if (isKillSwitchActive()) {
-    logger.warn(`Strategy entry blocked for ${symbol}: Kill Switch is active.`);
+  if (isKillSwitchActive() || isPanicSwitchActive()) {
+    logger.warn(`Strategy entry blocked for ${symbol}: Kill Switch or Panic Switch is active.`);
     return false;
   }
 

@@ -7,6 +7,8 @@ import {
   setPaperMode,
   isKillSwitchActive,
   setKillSwitch,
+  isPanicSwitchActive,
+  setPanicSwitch,
 } from '../helpers/modeManager.js';
 import { positionStores } from '../store/positionStore.js';
 import { calculateCurrentPnL } from '../jobs/monitorJob.js';
@@ -25,13 +27,30 @@ export const startTelegramBot = () => {
   try {
     telegramBot = new Telegraf(env.TELEGRAM_BOT_TOKEN);
 
+    // Middleware to authorize incoming commands/messages
+    telegramBot.use((ctx, next) => {
+      const fromId = ctx.from?.id ? String(ctx.from.id) : '';
+      if (fromId !== env.TELEGRAM_CHAT_ID) {
+        logger.warn(`Unauthorized Telegram command from user ID: ${fromId || 'unknown'}`);
+        return; // silently drop
+      }
+      return next();
+    });
+
     // Command: /status
     telegramBot.command('status', async (ctx) => {
       try {
         const paper = isPaperMode();
+        const killActive = isKillSwitchActive();
+        const panicActive = isPanicSwitchActive();
 
         let msg = `ℹ️ <b>System Status</b>\n`;
         msg += `<b>Trading Mode:</b> ${paper ? '🧪 PAPER' : '⚡ LIVE'}\n`;
+        if (killActive || panicActive) {
+          msg += `<b>System Status:</b> ${panicActive ? '🚨 PANIC (HALTED)' : '⚠️ KILLED (No new entries)'}\n`;
+        } else {
+          msg += `<b>System Status:</b> 🟢 RUNNING\n`;
+        }
         msg += `---------------------------------\n`;
 
         for (const symbol of ['NIFTY', 'SENSEX'] as const) {
@@ -105,7 +124,28 @@ export const startTelegramBot = () => {
       }
       const isKilled = isKillSwitchActive();
       ctx.reply(
-        `Kill Switch: ${isKilled ? '🚨 ACTIVE (Algo is PAUSED)' : '🟢 INACTIVE (Algo is RUNNING)'}`,
+        `Kill Switch: ${isKilled ? '🚨 ACTIVE (New entries are BLOCKED)' : '🟢 INACTIVE (New entries are ALLOWED)'}`,
+      );
+    });
+
+    // Command: /panic
+    telegramBot.command('panic', (ctx) => {
+      const args = ctx.message.text.split(' ');
+      if (args.length > 1) {
+        const setting = args[1].toLowerCase();
+        if (setting === 'on' || setting === 'true') {
+          setPanicSwitch(true);
+        } else if (setting === 'off' || setting === 'false') {
+          setPanicSwitch(false);
+        }
+      } else {
+        // Toggle if no arguments are provided
+        const active = isPanicSwitchActive();
+        setPanicSwitch(!active);
+      }
+      const isPanicked = isPanicSwitchActive();
+      ctx.reply(
+        `Panic Switch: ${isPanicked ? '🚨 ACTIVE (All entries, exits, and monitoring are HALTED)' : '🟢 INACTIVE (Monitoring and exits are active)'}`,
       );
     });
 

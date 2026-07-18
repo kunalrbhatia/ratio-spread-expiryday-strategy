@@ -129,18 +129,38 @@ export const apiRequest = async <T = any>(
       headers['Authorization'] = `Bearer ${session.jwtToken}`;
     }
 
-    const response: AxiosResponse<T> = await axios({
-      ...config,
-      headers,
-    });
+    try {
+      const response: AxiosResponse<T> = await axios({
+        timeout: 8000,
+        ...config,
+        headers,
+      });
 
-    // Check for application level status error in SmartAPI
-    const data = response.data as any;
-    if (data && data.status === false) {
-      throw new Error(data.message || 'SmartAPI error status false');
+      // Check for application level status error in SmartAPI
+      const data = response.data as any;
+      if (data && data.status === false) {
+        throw new Error(data.message || 'SmartAPI error status false');
+      }
+
+      return data;
+    } catch (error: any) {
+      if (
+        error.code === 'ECONNABORTED' ||
+        error.message?.includes('timeout') ||
+        error.message?.includes('ETIMEDOUT')
+      ) {
+        logger.error(`API Request timed out: ${config.method || 'GET'} ${config.url}`);
+        try {
+          const { sendAlert } = await import('../notifier.js');
+          await sendAlert(
+            `⚠️ <b>API Request Timeout!</b>\n<code>${config.method || 'GET'} ${config.url}</code> timed out after 8000ms.`,
+          );
+        } catch (alertErr: any) {
+          logger.error(`Failed to send timeout alert: ${alertErr.message}`);
+        }
+      }
+      throw error;
     }
-
-    return data;
   };
 
   return executeWithQueue(() => (skipRetry ? executeCall() : requestWithRetry(executeCall)));

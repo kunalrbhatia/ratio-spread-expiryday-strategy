@@ -4,7 +4,7 @@ import { smartStream, TickData } from '../helpers/websocket.js';
 import { notifierHelper } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
 import { INDEX_CONFIGS } from '../helpers/constants.js';
-import { isKillSwitchActive } from '../helpers/modeManager.js';
+import { isPanicSwitchActive } from '../helpers/modeManager.js';
 
 const isExiting: Record<'NIFTY' | 'SENSEX', boolean> = {
   NIFTY: false,
@@ -26,9 +26,9 @@ export const exitAllPositions = async (
     reason = symbolOrReason;
   }
 
-  if (isKillSwitchActive()) {
+  if (isPanicSwitchActive()) {
     logger.warn(
-      `Exit all positions blocked for ${symbol}: Kill Switch is active. (Reason: ${reason})`,
+      `Exit all positions blocked for ${symbol}: Panic Switch is active. (Reason: ${reason})`,
     );
     return false;
   }
@@ -127,7 +127,7 @@ export const handleIncomingTick = async (
   symbolOrTick: 'NIFTY' | 'SENSEX' | TickData,
   maybeTick?: TickData,
 ) => {
-  if (isKillSwitchActive()) {
+  if (isPanicSwitchActive()) {
     return;
   }
 
@@ -185,8 +185,8 @@ export const routeTick = (tick: TickData) => {
 };
 
 export const startContinuousMonitoring = (symbol: 'NIFTY' | 'SENSEX' = 'NIFTY') => {
-  if (isKillSwitchActive()) {
-    logger.warn(`Skipping continuous monitoring startup for ${symbol}: Kill Switch is active.`);
+  if (isPanicSwitchActive()) {
+    logger.warn(`Skipping continuous monitoring startup for ${symbol}: Panic Switch is active.`);
     return;
   }
 
