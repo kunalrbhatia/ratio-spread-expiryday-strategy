@@ -86,11 +86,32 @@ async function generateReport() {
   console.log(`📊 Generating post-expiry analysis for ${symbol} on ${expiryDate}`);
 
   // 2. Load snapshot data
-  const snapFile = path.join(ANALYSIS_DIR, 'snapshots', `${isoDate}.jsonl`);
+  const snapshotsDir = path.join(ANALYSIS_DIR, 'snapshots');
+  const snapFile = path.join(snapshotsDir, `${isoDate}.jsonl`);
   let snapshots = [];
+  let loadedSnapFile = snapFile;
+
   if (fs.existsSync(snapFile)) {
     const allSnaps = fs.readFileSync(snapFile, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
     snapshots = allSnaps.filter(s => s.index === symbol || (!s.index && symbol === 'NIFTY'));
+  } else if (fs.existsSync(snapshotsDir)) {
+    // Fallback: look for the most recent snapshot file containing data for this index
+    const files = fs.readdirSync(snapshotsDir)
+      .filter(f => f.endsWith('.jsonl'))
+      .sort()
+      .reverse();
+
+    for (const f of files) {
+      const filePath = path.join(snapshotsDir, f);
+      const allSnaps = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+      const filtered = allSnaps.filter(s => s.index === symbol || (!s.index && symbol === 'NIFTY'));
+      if (filtered.length > 0) {
+        snapshots = filtered;
+        loadedSnapFile = filePath;
+        console.log(`ℹ️  No snapshot file for ${isoDate}. Using latest available snapshot file: ${f}`);
+        break;
+      }
+    }
   }
 
   // 3. Load positions
@@ -100,7 +121,7 @@ async function generateReport() {
     finalState = JSON.parse(fs.readFileSync(posPath, 'utf8'));
   }
 
-  // 4. Fetch final LTPs from API
+  // 4. Fetch final LTPs from API or load from snapshot history
   let finalPnL = 0;
   let finalLegs = [];
   let finalSpot = 0;
@@ -148,15 +169,22 @@ async function generateReport() {
         return { symbol: leg.symbol, direction: leg.direction, qty: leg.qty, entry: leg.entryPremium, ltp: cp, pnl };
       });
     } catch (e) {
-      console.error('API fetch failed, using last snapshot:', e.message);
-      // Fallback to last snapshot
+      console.error('API fetch failed, using snapshot history:', e.message);
       if (snapshots.length > 0) {
         const last = snapshots[snapshots.length - 1];
         finalPnL = last.totalPnL;
-        finalLegs = last.legs;
-        finalSpot = last.niftySpot || last.spot;
+        finalLegs = last.legs || [];
+        finalSpot = last.spot || last.niftySpot;
       }
     }
+  } else if (snapshots.length > 0) {
+    // If active legs in position file are already cleared (e.g. position squared off), use final snapshot
+    const last = snapshots[snapshots.length - 1];
+    finalPnL = last.totalPnL;
+    finalLegs = last.legs || [];
+    finalSpot = last.spot || last.niftySpot;
+  } else {
+    console.warn(`⚠️  No active positions in ${posPath} and no snapshot history found in ${snapshotsDir}.`);
   }
 
   // 5. Calculate metrics
