@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Post-Expiry Analysis Report Generator
- * Run after market close (3:30 PM IST) on expiry days
+ * Run after market close (3:20 PM IST) on expiry days
  * Generates a markdown report and pushes to GitHub
  */
 
@@ -201,8 +201,8 @@ async function generateReport() {
     `| **Spot Close** | ₹${finalSpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} |`,
     `| **Spot Change** | ${spotChange >= 0 ? '+' : ''}${spotChange.toFixed(2)} pts |`,
     `| **Final P&L** | ${formatPnL(finalPnL)} |`,
-    `| **Max P&L** | +₹${maxPnL.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${maxPnLTime ? ` (at ${maxPnLTime})` : ''} |`,
-    `| **Min P&L** | ${minPnL >= 0 ? '+' : '-'}₹${Math.abs(minPnL).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${minPnLTime ? ` (at ${minPnLTime})` : ''} |`,
+    `| **Max P&L** | ${formatPnL(maxPnL)}${maxPnLTime ? ` (at ${maxPnLTime})` : ''} |`,
+    `| **Min P&L** | ${formatPnL(minPnL)}${minPnLTime ? ` (at ${minPnLTime})` : ''} |`,
     `| **Entry Margin** | ₹${(finalState?.entryMargin || 350000).toLocaleString('en-IN')} |`,
     `| **Return on Margin** | ${finalState?.entryMargin ? ((finalPnL / finalState.entryMargin) * 100).toFixed(2) : '0.00'}% |`,
     ``,
@@ -235,7 +235,7 @@ async function generateReport() {
   report.push(`## Strategy Details`, ``);
   report.push(`**Type:** ${config.strategyType}`);
   report.push(`**Entry Time:** ~9:20 AM IST (market open on expiry day)`);
-  report.push(`**Exit Time:** ~3:30 PM IST (market close square-off)`);
+  report.push(`**Exit Time:** ~3:20 PM IST (market close square-off)`);
   report.push(`**Stop Loss:** 1% of utilized margin`);
   report.push(``);
   report.push(`## Notes`, ``);

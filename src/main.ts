@@ -1,4 +1,6 @@
 import cron from 'node-cron';
+import path from 'path';
+import { execSync } from 'child_process';
 import { logger } from './helpers/logger.js';
 import { isExpiryDayForSymbol } from './helpers/holidayCheck.js';
 import { loginToSmartAPI } from './helpers/login.js';
@@ -121,11 +123,11 @@ const bootstrap = async () => {
       },
     );
 
-    // Cron C: Expiry strategy exit / market close (03:30 PM, Monday - Friday)
+    // Cron C: Expiry strategy exit / market close (03:20 PM, Monday - Friday)
     cron.schedule(
-      '30 15 * * 1-5',
+      '20 15 * * 1-5',
       async () => {
-        logger.info('Cron triggered: Checking for market close square-off (03:30 PM)...');
+        logger.info('Cron triggered: Checking for market close square-off (03:20 PM)...');
         const today = new Date();
         const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
         const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
@@ -138,19 +140,48 @@ const bootstrap = async () => {
           if (isNiftyExpiry) {
             const positions = positionStores.NIFTY.getPositions();
             if (positions.active) {
-              await exitAllPositions('NIFTY', 'Market close square-off (03:30 PM)');
+              await exitAllPositions('NIFTY', 'Market close square-off (03:20 PM)');
             }
           }
 
           if (isSensexExpiry) {
             const positions = positionStores.SENSEX.getPositions();
             if (positions.active) {
-              await exitAllPositions('SENSEX', 'Market close square-off (03:30 PM)');
+              await exitAllPositions('SENSEX', 'Market close square-off (03:20 PM)');
             }
           }
         } else {
           logger.info(
             'Today is not an expiry day for NIFTY or SENSEX. Skipping market close check.',
+          );
+        }
+      },
+      {
+        timezone: BOOTSTRAP_TIMEZONE,
+      },
+    );
+
+    // Cron D: Post-expiry report generation (03:40 PM, Monday - Friday)
+    cron.schedule(
+      '40 15 * * 1-5',
+      async () => {
+        logger.info('Cron triggered: Checking for post-expiry report generation (03:40 PM)...');
+        const today = new Date();
+        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
+        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
+
+        if (isNiftyExpiry || isSensexExpiry) {
+          const symbol = isNiftyExpiry ? 'NIFTY' : 'SENSEX';
+          try {
+            const scriptPath = path.join(process.cwd(), 'analysis', 'generate-report.cjs');
+            execSync(`node "${scriptPath}" ${symbol}`, { stdio: 'inherit' });
+            logger.info(`Successfully generated post-expiry analysis report for ${symbol}`);
+          } catch (err: any) {
+            logger.error(`Failed to generate post-expiry report for ${symbol}: ${err.message}`);
+          }
+        } else {
+          logger.info(
+            'Today is not an expiry day for NIFTY or SENSEX. Skipping report generation.',
           );
         }
       },
