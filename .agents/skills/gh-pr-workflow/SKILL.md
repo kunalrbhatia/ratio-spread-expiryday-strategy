@@ -49,6 +49,6 @@ Implements JWT authentication and protected routes.
 
 ### Verification
 
-- `npm test` passed.
+- `pnpm test` passed.
 - Manual login verification successful.
 ```

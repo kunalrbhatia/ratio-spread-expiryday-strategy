@@ -19,7 +19,7 @@ Immediately after entry, execute:
 * Retreive utilized margin block from Angel One.
 * Set Stop-Loss at **1% of entry margin**.
 * Stream option prices in real-time over the updated Angel One SmartStream WebSocket protocol (`wss://smartapisocket.angelone.in/smart-stream`). If combined loss hits 1% of margin at any point, exit all positions immediately.
-* If SL is not hit, hold and square off at **03:30 PM IST** (market close).
+* If SL is not hit, hold and square off at **03:20 PM IST** (market close).
 
 ---
 
@@ -112,7 +112,7 @@ The following endpoint patches are applied in `src/helpers/`:
 On each expiry day (Tuesdays for Nifty, Thursdays for Sensex), the strategy runs an automated analysis pipeline:
 
 1. **Snapshot Collector** — every 15 min (9:15 AM–3:30 PM IST) captures P&L snapshots to `analysis/snapshots/` dynamically detecting active positions across Nifty and Sensex.
-2. **Post-Close Report** — at 3:35 PM IST, generates a markdown report in `analysis/reports/` named as `expiry-[symbol]-[date].md` and opens a PR.
+2. **Post-Close Report** — at 3:40 PM IST, generates a markdown report in `analysis/reports/` named as `expiry-[symbol]-[date].md` and opens a PR.
 
 Reports include: entry/exit spot prices, leg-wise P&L, P&L timeline, and return metrics.
 

@@ -4,7 +4,7 @@
 
 **Weekly Nifty Option Ratio Spread Strategy** — A weekly options trading strategy executed on expiry days to capture premium decay while managing risk with a strict margin-based stop-loss.
 
-The strategy enters positions at **09:20 AM IST** on the weekly expiry day (normally Tuesday, or Monday if Tuesday is a market holiday), and holds until market close (**03:30 PM IST**) or until a strict **1% margin-based stop-loss** is hit.
+The strategy enters positions at **09:20 AM IST** on the weekly expiry day (normally Tuesday, or Monday if Tuesday is a market holiday), and holds until market close (**03:20 PM IST**) or until a strict **1% margin-based stop-loss** is hit.
 
 ---
 
@@ -41,7 +41,7 @@ Immediately after entry, execute the sell-side hedges:
 * **Monitoring**:
   * Monitor the combined net P&L of the entire position continuously.
   * If the net loss reaches or exceeds the 1% margin threshold at any point during the day, **exit all positions immediately** and take no further action for the day.
-* **Target Exit**: If the stop-loss is not triggered, hold all positions until **03:30 PM IST** (market close) and square off.
+* **Target Exit**: If the stop-loss is not triggered, hold all positions until **03:20 PM IST** (market close) and square off.
 
 ### 5. API Rate Limiting, Throttling & Retries
 * **Throttling Constraint**: To prevent API rate limit issues (HTTP 429) and network bottlenecks with Angel One SmartAPI, all outgoing API requests must be throttled to ensure a **minimum gap of 1000 ms** between consecutive API calls.
@@ -170,7 +170,7 @@ SLACK_SIGNING_SECRET=
   ├─ Set SL = 1% of entry margin
   └─ Notify Telegram: "🟢 Strategy Entry complete. SL set at ₹SL_Amount"
 
-09:21 AM - 03:30 PM IST (Continuous Monitoring via WebSocket)
+09:21 AM - 03:20 PM IST (Continuous Monitoring via WebSocket)
   ├─ Initialize WebSocket connection (SmartStream SDK)
   ├─ Subscribe to token tokens for all 4 positions (Call long/short, Put long/short)
   ├─ On each live tick (LTP update):
@@ -181,7 +181,7 @@ SLACK_SIGNING_SECRET=
   │    │    ├─ Clear data/positions.json
   │    │    └─ Notify Telegram: "🚨 STOP LOSS TRIGGERED! Exited all positions."
   │
-  └─ At 03:30 PM IST (Market Close):
+  └─ At 03:20 PM IST (Market Close):
        ├─ If positions are still active:
        ├─ Execute Market Order to exit all 4 positions
        ├─ Clear data/positions.json
