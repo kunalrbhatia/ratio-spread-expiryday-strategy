@@ -133,7 +133,7 @@ async function generateReport() {
         method: 'POST', url: `${BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword`,
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
           'X-UserType': 'USER', 'X-SourceID': 'WEB', 'X-ClientLocalIP': '192.168.1.1',
-          'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': 'fe80::216:3eff:fe0f:1105',
+          'X-ClientPublicIP': '106.193.147.98', 'X-MACaddress': 'fe80::216:3eff:fe0f:1105',
           'X-PrivateKey': env.API_KEY,
         },
         data: { clientcode: env.CLIENT_CODE, password: env.CLIENT_PIN, totp }
@@ -142,7 +142,7 @@ async function generateReport() {
       const headers = {
         'Content-Type': 'application/json', 'Accept': 'application/json',
         'X-UserType': 'USER', 'X-SourceID': 'WEB', 'X-ClientLocalIP': '192.168.1.1',
-        'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': 'fe80::216:3eff:fe0f:1105',
+        'X-ClientPublicIP': '106.193.147.98', 'X-MACaddress': 'fe80::216:3eff:fe0f:1105',
         'Authorization': `Bearer ${jwtToken}`, 'X-PrivateKey': env.API_KEY,
       };
 
@@ -168,6 +168,23 @@ async function generateReport() {
         finalPnL += pnl;
         return { symbol: leg.symbol, direction: leg.direction, qty: leg.qty, entry: leg.entryPremium, ltp: cp, pnl };
       });
+
+      // Override with broker's actual P&L from position book for accuracy
+      try {
+        const posRes = await axios({
+          method: 'GET', url: `${BASE_URL}/rest/secure/angelbroking/order/v1/getPosition`,
+          headers,
+        });
+        const posData = posRes.data.data || [];
+        const idxPos = posData.filter(p => p.symbolname === symbol.toUpperCase());
+        const brokerPnl = idxPos.reduce((s, p) => s + parseFloat(p.pnl || 0), 0);
+        if (brokerPnl !== 0) {
+          finalPnL = brokerPnl;
+          console.log(`📊 Using broker position book P&L: ₹${brokerPnl}`);
+        }
+      } catch (posErr) {
+        console.warn('⚠️  Could not fetch broker position book, using calculated P&L');
+      }
     } catch (e) {
       console.error('API fetch failed, using snapshot history:', e.message);
       if (snapshots.length > 0) {
