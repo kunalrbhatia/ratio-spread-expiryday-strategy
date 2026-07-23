@@ -121,87 +121,91 @@ async function generateReport() {
     finalState = JSON.parse(fs.readFileSync(posPath, 'utf8'));
   }
 
-  // 4. Fetch final LTPs from API or load from snapshot history
+  // 4. Fetch final data — try broker position book first for accuracy, then LTPs, then snapshots
   let finalPnL = 0;
   let finalLegs = [];
   let finalSpot = 0;
 
-  if (finalState && finalState.legs && finalState.legs.length > 0) {
-    try {
-      const totp = authenticator.generate(env.CLIENT_TOTP_PIN);
-      const loginRes = await axios({
-        method: 'POST', url: `${BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword`,
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
-          'X-UserType': 'USER', 'X-SourceID': 'WEB', 'X-ClientLocalIP': '192.168.1.1',
-          'X-ClientPublicIP': '106.193.147.98', 'X-MACaddress': 'fe80::216:3eff:fe0f:1105',
-          'X-PrivateKey': env.API_KEY,
-        },
-        data: { clientcode: env.CLIENT_CODE, password: env.CLIENT_PIN, totp }
-      });
-      const { jwtToken } = loginRes.data.data;
-      const headers = {
-        'Content-Type': 'application/json', 'Accept': 'application/json',
+  // Always attempt broker position book for actual P&L (works even after positions cleared)
+  try {
+    const totp = authenticator.generate(env.CLIENT_TOTP_PIN);
+    const loginRes = await axios({
+      method: 'POST', url: `${BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword`,
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
         'X-UserType': 'USER', 'X-SourceID': 'WEB', 'X-ClientLocalIP': '192.168.1.1',
         'X-ClientPublicIP': '106.193.147.98', 'X-MACaddress': 'fe80::216:3eff:fe0f:1105',
-        'Authorization': `Bearer ${jwtToken}`, 'X-PrivateKey': env.API_KEY,
-      };
+        'X-PrivateKey': env.API_KEY,
+      },
+      data: { clientcode: env.CLIENT_CODE, password: env.CLIENT_PIN, totp }
+    });
+    const { jwtToken } = loginRes.data.data;
+    const headers = {
+      'Content-Type': 'application/json', 'Accept': 'application/json',
+      'X-UserType': 'USER', 'X-SourceID': 'WEB', 'X-ClientLocalIP': '192.168.1.1',
+      'X-ClientPublicIP': '106.193.147.98', 'X-MACaddress': 'fe80::216:3eff:fe0f:1105',
+      'Authorization': `Bearer ${jwtToken}`, 'X-PrivateKey': env.API_KEY,
+    };
 
+    // Fetch spot price
+    try {
       const spotRes = await axios({
         method: 'POST', url: `${BASE_URL}/rest/secure/angelbroking/market/v1/quote`,
         headers, data: { mode: 'LTP', exchangeTokens: { [config.exchange]: [config.spotToken] } }
       });
       finalSpot = parseFloat(spotRes.data.data.fetched[0].ltp);
+    } catch (spotErr) {}
 
-      const tokens = finalState.legs.map(l => l.token);
-      const ltpRes = await axios({
-        method: 'POST', url: `${BASE_URL}/rest/secure/angelbroking/market/v1/quote`,
-        headers, data: { mode: 'LTP', exchangeTokens: { [config.optionExchange]: tokens } }
+    // Fetch broker position book for actual P&L
+    try {
+      const posRes = await axios({
+        method: 'GET', url: `${BASE_URL}/rest/secure/angelbroking/order/v1/getPosition`,
+        headers,
       });
-      const ltpMap = new Map();
-      for (const item of ltpRes.data.data.fetched) {
-        ltpMap.set(item.symbolToken, parseFloat(item.ltp));
+      const posData = posRes.data.data || [];
+      const idxPos = posData.filter(p => p.symbolname === symbol.toUpperCase());
+      const brokerPnl = idxPos.reduce((s, p) => s + parseFloat(p.pnl || 0), 0);
+      if (brokerPnl !== 0) {
+        finalPnL = brokerPnl;
+        console.log(`📊 Using broker position book P&L: ₹${brokerPnl}`);
       }
-
-      finalLegs = finalState.legs.map(leg => {
-        const cp = ltpMap.get(leg.token) ?? leg.entryPremium;
-        const pnl = leg.direction === 'BUY' ? (cp - leg.entryPremium) * leg.qty : (leg.entryPremium - cp) * leg.qty;
-        finalPnL += pnl;
-        return { symbol: leg.symbol, direction: leg.direction, qty: leg.qty, entry: leg.entryPremium, ltp: cp, pnl };
-      });
-
-      // Override with broker's actual P&L from position book for accuracy
-      try {
-        const posRes = await axios({
-          method: 'GET', url: `${BASE_URL}/rest/secure/angelbroking/order/v1/getPosition`,
-          headers,
-        });
-        const posData = posRes.data.data || [];
-        const idxPos = posData.filter(p => p.symbolname === symbol.toUpperCase());
-        const brokerPnl = idxPos.reduce((s, p) => s + parseFloat(p.pnl || 0), 0);
-        if (brokerPnl !== 0) {
-          finalPnL = brokerPnl;
-          console.log(`📊 Using broker position book P&L: ₹${brokerPnl}`);
-        }
-      } catch (posErr) {
-        console.warn('⚠️  Could not fetch broker position book, using calculated P&L');
+      // Also get leg details from broker if available
+      if (idxPos.length > 0) {
+        finalLegs = idxPos.map(p => ({
+          symbol: p.tradingsymbol, direction: p.netqty > 0 ? 'BUY' : 'SELL',
+          qty: Math.abs(parseInt(p.netqty || 0)), entry: parseFloat(p.totalbuyavgprice || p.totalsellavgprice || 0),
+          ltp: parseFloat(p.ltp || 0), pnl: parseFloat(p.pnl || 0)
+        }));
       }
-    } catch (e) {
-      console.error('API fetch failed, using snapshot history:', e.message);
-      if (snapshots.length > 0) {
-        const last = snapshots[snapshots.length - 1];
-        finalPnL = last.totalPnL;
-        finalLegs = last.legs || [];
-        finalSpot = last.spot || last.niftySpot;
-      }
+    } catch (posErr) {
+      console.warn('⚠️  Could not fetch broker position book');
     }
-  } else if (snapshots.length > 0) {
-    // If active legs in position file are already cleared (e.g. position squared off), use final snapshot
-    const last = snapshots[snapshots.length - 1];
-    finalPnL = last.totalPnL;
-    finalLegs = last.legs || [];
-    finalSpot = last.spot || last.niftySpot;
-  } else {
-    console.warn(`⚠️  No active positions in ${posPath} and no snapshot history found in ${snapshotsDir}.`);
+
+    // If broker data missing legs, try position file or LTPs
+    if (finalLegs.length === 0 && finalState && finalState.legs && finalState.legs.length > 0) {
+      try {
+        const tokens = finalState.legs.map(l => l.token);
+        const ltpRes = await axios({
+          method: 'POST', url: `${BASE_URL}/rest/secure/angelbroking/market/v1/quote`,
+          headers, data: { mode: 'LTP', exchangeTokens: { [config.optionExchange]: tokens } }
+        });
+        const ltpMap = new Map();
+        for (const item of ltpRes.data.data.fetched) ltpMap.set(item.symbolToken, parseFloat(item.ltp));
+        finalLegs = finalState.legs.map(leg => {
+          const cp = ltpMap.get(leg.token) ?? leg.entryPremium;
+          const pnl = leg.direction === 'BUY' ? (cp - leg.entryPremium) * leg.qty : (leg.entryPremium - cp) * leg.qty;
+          return { symbol: leg.symbol, direction: leg.direction, qty: leg.qty, entry: leg.entryPremium, ltp: cp, pnl };
+        });
+      } catch (ltpErr) {}
+    }
+  } catch (err) {
+    console.error('API fetch failed:', err.message);
+    // Fallback to snapshot history
+    if (snapshots.length > 0) {
+      const last = snapshots[snapshots.length - 1];
+      finalPnL = last.totalPnL;
+      finalLegs = last.legs || [];
+      finalSpot = last.spot || last.niftySpot;
+    }
   }
 
   // 5. Calculate metrics
