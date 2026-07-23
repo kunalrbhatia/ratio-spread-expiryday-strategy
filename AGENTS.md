@@ -125,6 +125,7 @@ Same SmartAPI credentials + `LOTS=1`.
 | Margin API wrong payload fields | Use `token`, `qty`, `tradeType`, `productType` (not `symboltoken`, `quantity`, etc.) | `brokerClient.ts` |
 | Margin API response field wrong | Read `data.totalMarginRequired` (not `totalMargin` or `marginBlock`) | `orders.ts`, `brokerClient.ts` |
 | Margin API returns `[]` via native `fetch` | Fallback to verified ₹1,30,000 for BankNifty | `brokerClient.ts` |
+| Worthless option square-off | Skip exit order for options with LTP < ₹5.0 during market close square-off to save brokerage | `monitorJob.ts` |
 
 ---
 
