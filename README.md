@@ -19,7 +19,7 @@ Immediately after entry, execute:
 * Retreive utilized margin block from Angel One.
 * Set Stop-Loss at **1% of entry margin**.
 * Stream option prices in real-time over the updated Angel One SmartStream WebSocket protocol (`wss://smartapisocket.angelone.in/smart-stream`). If combined loss hits 1% of margin at any point, exit all positions immediately.
-* If SL is not hit, hold and square off at **03:20 PM IST** (market close).
+* If SL is not hit, hold and square off at **03:20 PM IST** (market close). To save on brokerage fees, any option leg whose LTP is less than ₹5.0 at square-off is allowed to expire worthless instead of placing a close order.
 
 ---
 
