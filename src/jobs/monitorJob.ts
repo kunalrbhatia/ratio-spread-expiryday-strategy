@@ -5,6 +5,7 @@ import { notifierHelper } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
 import { INDEX_CONFIGS } from '../helpers/constants.js';
 import { isPanicSwitchActive } from '../helpers/modeManager.js';
+import { getOptionLtps } from '../helpers/marketData.js';
 
 const isExiting: Record<'NIFTY' | 'SENSEX', boolean> = {
   NIFTY: false,
@@ -51,8 +52,33 @@ export const exitAllPositions = async (
     const succeededLegs: OptionLeg[] = [];
     const failedLegs: OptionLeg[] = [];
 
+    // Fetch latest LTPs to ensure we have the most accurate prices for our filter
+    let ltpMap = new Map<string, number>();
+    try {
+      ltpMap = await getOptionLtps(
+        positions.legs.map((l) => l.token),
+        symbol,
+      );
+    } catch (err: any) {
+      logger.error(`Failed to fetch latest LTPs before exit for ${symbol}: ${err.message}`);
+    }
+
     // Execute exit orders for each leg
     for (const leg of positions.legs) {
+      const currentPrice = ltpMap.get(leg.token) ?? leg.currentPrice ?? leg.entryPremium;
+      leg.currentPrice = currentPrice; // Ensure the P&L calculation has the latest price
+
+      // Only check the < 5 condition during scheduled market close square-off
+      const isMarketClose = reason.includes('Market close square-off');
+      if (isMarketClose && currentPrice < 5) {
+        logger.info(
+          `[${symbol}] Skipping exit for worthless leg ${leg.symbol} (${leg.token}) as LTP is ₹${currentPrice} (< ₹5.0)`,
+        );
+        succeededLegs.push(leg);
+        smartStream.unsubscribe([leg.token], symbol);
+        continue;
+      }
+
       const exitTxType = leg.direction === 'BUY' ? 'SELL' : 'BUY';
       try {
         await ordersHelper.placeOptionOrder({
