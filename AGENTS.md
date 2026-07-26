@@ -2,7 +2,7 @@
 context-for: hermes-agent
 model: deepseek-v4-flash
 provider: deepseek
-last-updated: 2026-07-19
+last-updated: 2026-07-26
 project-version: 1.0.0
 ---
 
@@ -31,6 +31,7 @@ Two related automated options trading systems using Angel One SmartAPI:
   - 08:30 — Scrip master download (expiry days only)
   - 09:20 — Strategy entry (expiry days)
   - 15:30 — Market close square-off
+  - Every minute — MTM logging (Monday - Friday)
 - **Monitoring** — SmartStream WebSocket (real-time tick stream), stop-loss at 1% of margin
 - **Entry flow:** Login → Get spot LTP → Find ATM strikes → Buy 1 lot ATM CE + PE → Find hedge strikes at 1/3 premium → Sell 3 lots each → Save position
 
@@ -61,6 +62,7 @@ Two related automated options trading systems using Angel One SmartAPI:
 | `src/helpers/constants.ts` | INDEX_CONFIGS (NIFTY, SENSEX), exchange/lot/step config |
 | `src/jobs/entryJob.ts` | Full strategy entry — spot → ATM → hedge → orders → save |
 | `src/jobs/monitorJob.ts` | WebSocket tick handler, P&L calc, SL check, exit execution |
+| `src/jobs/mtmLogger.ts` | Calculates and logs MTM values to daily file per active position every minute |
 | `src/store/positionStore.ts` | Per-index position files (`nifty_positions.json`, `sensex_positions.json`) |
 | `src/store/sessionStore.ts` | In-memory JWT/feed/refresh tokens |
 | `src/telegram/bot.ts` | Telegram commands (DISABLED — bot token conflicts with Hermes) |

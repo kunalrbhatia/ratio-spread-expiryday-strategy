@@ -11,6 +11,7 @@ import { positionStores } from './store/positionStore.js';
 import { startTelegramBot } from './telegram/bot.js';
 import { startExpressServer } from './server.js';
 import { isPaperMode } from './helpers/modeManager.js';
+import { startMtmLogging } from './jobs/mtmLogger.js';
 
 const BOOTSTRAP_TIMEZONE = 'Asia/Kolkata';
 
@@ -189,6 +190,10 @@ const bootstrap = async () => {
         timezone: BOOTSTRAP_TIMEZONE,
       },
     );
+
+    // Cron E: Per-minute MTM logging (Every minute, Monday - Friday)
+    logger.info('Scheduling Cron E: Per-minute MTM logging...');
+    startMtmLogging();
 
     logger.info('All cron jobs scheduled successfully.');
 
