@@ -113,6 +113,7 @@ On each expiry day (Tuesdays for Nifty, Thursdays for Sensex), the strategy runs
 
 1. **Snapshot Collector** — every 15 min (9:15 AM–3:30 PM IST) captures P&L snapshots to `analysis/snapshots/` dynamically detecting active positions across Nifty and Sensex.
 2. **Post-Close Report** — at 3:40 PM IST, generates a markdown report in `analysis/reports/` named as `expiry-[symbol]-[date].md` and opens a PR.
+3. **Per-Minute MTM Logger** — appends current mark-to-market P&L to `logs/mtm/mtm-[symbol]-[date].log` every minute (Monday–Friday) for active NIFTY and SENSEX positions, allowing external tools to track performance using the WebSocket stream without extra API calls.
 
 Reports include: entry/exit spot prices, leg-wise P&L, P&L timeline, and return metrics.
 
