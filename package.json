@@ -8,6 +8,7 @@
     "dev": "tsx src/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
+    "backtest": "tsx src/backtest/run-backtest.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:cov": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
