@@ -66,11 +66,18 @@ export async function runBacktest(config: BacktestConfig) {
       sshArgs.push('-i', String(config.sshKeyPath || process.env.DATA_SSH_KEY));
     }
 
-    // Streams remote files through zcat/cat without disk writes or loading into RAM
+    const passphrase = process.env.KEY_PASSPHRASE;
     const remoteCmd = `find ${remotePath} -type f \\( -name "*.csv" -o -name "*.csv.gz" \\) | sort | xargs -r zcat -f`;
     sshArgs.push(`${sshUser}@${sshHost}`, remoteCmd);
 
-    const sshProcess = spawn('ssh', sshArgs);
+    let sshProcess;
+    if (passphrase) {
+      // Use sshpass to pass key passphrase non-interactively in automated low-memory execution
+      sshProcess = spawn('sshpass', ['-p', passphrase, 'ssh', ...sshArgs]);
+    } else {
+      sshProcess = spawn('ssh', sshArgs);
+    }
+
     sshProcess.stderr.on('data', (data) => {
       logger.debug(`SSH Stderr: ${data.toString().trim()}`);
     });
