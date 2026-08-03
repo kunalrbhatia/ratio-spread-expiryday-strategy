@@ -63,6 +63,26 @@ pm2 start ecosystem.config.cjs
 
 ---
 
+## Backtesting
+
+Run a low-memory stream backtest against remote option chain datasets (e.g. `nifty-optionchain-data`):
+
+```bash
+pnpm backtest
+```
+
+### Remote Data Configuration
+Add remote SSH server credentials in `.env` to stream option chain tick datasets on the fly without storing files locally or overloading server RAM (< 50MB peak memory):
+```env
+DATA_SSH_HOST=your_ssh_host
+DATA_SSH_USER=ubuntu
+DATA_SSH_PORT=22
+DATA_SSH_KEY=~/.ssh/id_rsa
+DATA_REMOTE_PATH=/data/nifty-optionchain
+```
+
+---
+
 ## Commands
 
 Control and inspect the strategy via Telegram Bot commands:
