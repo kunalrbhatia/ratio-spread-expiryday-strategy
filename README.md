@@ -79,6 +79,7 @@ DATA_SSH_USER=ubuntu
 DATA_SSH_PORT=22
 DATA_SSH_KEY=~/.ssh/id_rsa
 DATA_REMOTE_PATH=/data/nifty-optionchain
+KEY_PASSPHRASE=your_key_passphrase
 ```
 
 ---
