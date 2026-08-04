@@ -9,11 +9,11 @@
 | **Spot Entry** | ₹24,601.90 |
 | **Spot Close** | ₹24,614.90 |
 | **Spot Change** | +13.00 pts |
-| **Final P&L** | 🔴 -₹1,690.00 |
+| **Final P&L** | 🔴 -₹1,509.30 |
 | **Max P&L** | 🟢 +₹1,368.25 (at 11:27:00 am) |
 | **Min P&L** | 🔴 -₹4,806.75 (at 1:58:00 pm) |
 | **Entry Margin** | ₹8,29,108.02 |
-| **Return on Margin** | -0.20% |
+| **Return on Margin** | -0.18% |
 
 ## Positions at Close
 
@@ -64,6 +64,7 @@
 ## Notes
 
 Nifty moved from ₹24,601.9 to ₹24,614.9 on the expiry day.
-Final P&L and intraday timeline sourced from the app's exit notification and minute-level MTM log (no 15-min snapshots captured today).
+Final P&L from the broker position book (authoritative): -₹1,509.30. App exit notification reported -₹1,690.00; difference is entry-price averaging (broker avg vs logged fills).
+Intraday timeline sourced from the minute-level MTM log.
 
 _Auto-generated post-expiry analysis by Hermes_
