@@ -94,24 +94,10 @@ async function generateReport() {
   if (fs.existsSync(snapFile)) {
     const allSnaps = fs.readFileSync(snapFile, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
     snapshots = allSnaps.filter(s => s.index === symbol || (!s.index && symbol === 'NIFTY'));
-  } else if (fs.existsSync(snapshotsDir)) {
-    // Fallback: look for the most recent snapshot file containing data for this index
-    const files = fs.readdirSync(snapshotsDir)
-      .filter(f => f.endsWith('.jsonl'))
-      .sort()
-      .reverse();
-
-    for (const f of files) {
-      const filePath = path.join(snapshotsDir, f);
-      const allSnaps = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
-      const filtered = allSnaps.filter(s => s.index === symbol || (!s.index && symbol === 'NIFTY'));
-      if (filtered.length > 0) {
-        snapshots = filtered;
-        loadedSnapFile = filePath;
-        console.log(`ℹ️  No snapshot file for ${isoDate}. Using latest available snapshot file: ${f}`);
-        break;
-      }
-    }
+  } else {
+    // NOTE: do NOT fall back to snapshot files from other dates — they are stale data from a
+    // previous trade and would produce a misleading timeline. Only use today's snapshot file.
+    console.log(`⚠️  No snapshot file for ${isoDate}. Timeline will be limited to broker/settlement data.`);
   }
 
   // 3. Load positions
@@ -208,26 +194,124 @@ async function generateReport() {
     }
   }
 
+  // 4b. App log is the AUTHORITATIVE source for today's final P&L and trade legs.
+  // The broker position book P&L is CUMULATIVE across all historical trades on the symbol,
+  // so it must NOT be trusted as today's P&L (see expiry-post-analysis skill).
+  let appLogSpot = 0;
+  let appLogMargin = 0;
+  try {
+    const appLogPath = path.join(REPO_DIR, 'logs', `app-${isoDate}.log`);
+    if (fs.existsSync(appLogPath)) {
+      const logText = fs.readFileSync(appLogPath, 'utf8');
+      // Authoritative final P&L from the exit notification
+      const pnlMatch = logText.match(/Final Trade P&L:[^₹]*₹([-\d,]+)/);
+      if (pnlMatch) {
+        const appLogPnl = parseFloat(pnlMatch[1].replace(/,/g, ''));
+        if (appLogPnl !== 0) {
+          finalPnL = appLogPnl;
+          console.log(`📊 Using app log Final Trade P&L (authoritative): ₹${appLogPnl}`);
+        }
+      }
+      // Entry spot + margin from the entry phase
+      const spotMatch = logText.match(new RegExp(`${symbol} Spot LTP: ([\\d.]+)`));
+      if (spotMatch) appLogSpot = parseFloat(spotMatch[1]);
+      const marginMatch = logText.match(/Fetched utilized margin from SmartAPI: ₹([\d.]+)/);
+      if (marginMatch) appLogMargin = parseFloat(marginMatch[1]);
+      // Reconstruct today's legs from entry orders (before "Initiating Exit")
+      const entrySection = logText.split('Initiating Exit')[0] || '';
+      const orderRe = /Placing Order: \[LIVE\] (BUY|SELL) (\d+) qty of ([A-Z0-9]+) \(\d+\) on \w+/g;
+      const premiumRe = /(?:ATM CE|ATM PE|Selected hedge CE to sell: [A-Z0-9]+|Selected hedge PE to sell: [A-Z0-9]+).*?₹([\d.]+)/g;
+      const legs = [];
+      let om;
+      const premiums = {};
+      // Capture entry premiums from the log
+      const atmCe = logText.match(/ATM CE Entry Premium: ₹([\d.]+)/);
+      const atmPe = logText.match(/ATM PE Entry Premium: ₹([\d.]+)/);
+      const hedgeCe = logText.match(/Selected hedge CE to sell: ([A-Z0-9]+) at premium ₹([\d.]+)/);
+      const hedgePe = logText.match(/Selected hedge PE to sell: ([A-Z0-9]+) at premium ₹([\d.]+)/);
+      if (atmCe) premiums.atmCe = parseFloat(atmCe[1]);
+      if (atmPe) premiums.atmPe = parseFloat(atmPe[1]);
+      if (hedgeCe) premiums[hedgeCe[1]] = parseFloat(hedgeCe[2]);
+      if (hedgePe) premiums[hedgePe[1]] = parseFloat(hedgePe[2]);
+      while ((om = orderRe.exec(entrySection)) !== null) {
+        const dir = om[1];
+        const qty = parseInt(om[2], 10);
+        const sym = om[3];
+        let entry = 0;
+        if (dir === 'BUY') {
+          entry = premiums[sym] || (sym.endsWith('CE') ? premiums.atmCe : premiums.atmPe) || 0;
+        } else {
+          entry = premiums[sym] || 0;
+        }
+        legs.push({ symbol: sym, direction: dir, qty, entry, ltp: 0, pnl: 0 });
+      }
+      if (legs.length > 0) {
+        // Attach close LTP + per-leg P&L from broker rows matched by symbol
+        const brokerBySym = new Map(finalLegs.map(l => [l.symbol, l]));
+        finalLegs = legs.map(leg => {
+          const b = brokerBySym.get(leg.symbol);
+          if (b) {
+            leg.ltp = b.ltp;
+            leg.pnl = b.pnl;
+          }
+          return leg;
+        });
+        console.log(`📊 Reconstructed ${finalLegs.length} legs from app log`);
+      }
+    }
+  } catch (appLogErr) {
+    console.warn('⚠️  Could not parse app log for authoritative data');
+  }
+
+  // 4c. If no intraday snapshots were captured today, fall back to the minute-level MTM log
+  // (logs/mtm/mtm-<index>-<date>.log) for the P&L timeline — it is today's real marked-to-market data.
+  let mtmAll = [];
+  if (snapshots.length === 0) {
+    const mtmPath = path.join(REPO_DIR, 'logs', 'mtm', `mtm-${symbol.toLowerCase()}-${isoDate}.log`);
+    if (fs.existsSync(mtmPath)) {
+      try {
+        const lines = fs.readFileSync(mtmPath, 'utf8').trim().split('\n').filter(Boolean);
+        const parsed = [];
+        for (const line of lines) {
+          const m = line.match(/\[(\d+\/\d+\/\d+), ([^\]]+)\] \[INFO\] \w+: MTM = (-?[\d.]+)/);
+          if (m) parsed.push({ ist: m[2], totalPnL: parseFloat(m[3]) });
+        }
+        if (parsed.length > 0) {
+          // Keep the full minute-level set for max/min; sample every 15th entry for the table
+          mtmAll = parsed;
+          snapshots = parsed.filter((_, i) => i % 15 === 0);
+          if (snapshots[snapshots.length - 1]?.ist !== parsed[parsed.length - 1]?.ist) {
+            snapshots.push(parsed[parsed.length - 1]); // ensure the final 3:20 PM value is included
+          }
+          console.log(`📊 Using MTM log for intraday P&L timeline (${parsed.length} minute entries)`);
+        }
+      } catch (mtmErr) {
+        console.warn('⚠️  Could not parse MTM log');
+      }
+    }
+  }
+
   // 5. Calculate metrics
   let maxPnL = finalPnL;
   let maxPnLTime = '';
   let minPnL = finalPnL;
   let minPnLTime = '';
 
-  if (snapshots.length > 0) {
-    let maxSnap = snapshots[0];
-    let minSnap = snapshots[0];
-    for (const s of snapshots) {
+  const statsSource = mtmAll.length > 0 ? mtmAll : snapshots;
+  if (statsSource.length > 0) {
+    let maxSnap = statsSource[0];
+    let minSnap = statsSource[0];
+    for (const s of statsSource) {
       if (s.totalPnL > maxSnap.totalPnL) maxSnap = s;
       if (s.totalPnL < minSnap.totalPnL) minSnap = s;
     }
     maxPnL = maxSnap.totalPnL;
-    maxPnLTime = maxSnap.ist?.split(',')[1]?.trim() || '';
+    maxPnLTime = maxSnap.ist?.includes(',') ? maxSnap.ist.split(',')[1]?.trim() : (maxSnap.ist || '');
     minPnL = minSnap.totalPnL;
-    minPnLTime = minSnap.ist?.split(',')[1]?.trim() || '';
+    minPnLTime = minSnap.ist?.includes(',') ? minSnap.ist.split(',')[1]?.trim() : (minSnap.ist || '');
   }
 
-  const entrySpot = snapshots.length > 0 ? (snapshots[0].spot || snapshots[0].niftySpot) : finalSpot;
+  const entrySpot = appLogSpot || (snapshots.length > 0 ? (snapshots[0].spot || snapshots[0].niftySpot) : finalSpot);
   const spotChange = finalSpot - entrySpot;
 
   // Format P&L helper
@@ -252,8 +336,8 @@ async function generateReport() {
     `| **Final P&L** | ${formatPnL(finalPnL)} |`,
     `| **Max P&L** | ${formatPnL(maxPnL)}${maxPnLTime ? ` (at ${maxPnLTime})` : ''} |`,
     `| **Min P&L** | ${formatPnL(minPnL)}${minPnLTime ? ` (at ${minPnLTime})` : ''} |`,
-    `| **Entry Margin** | ₹${(finalState?.entryMargin || 350000).toLocaleString('en-IN')} |`,
-    `| **Return on Margin** | ${finalState?.entryMargin ? ((finalPnL / finalState.entryMargin) * 100).toFixed(2) : '0.00'}% |`,
+    `| **Entry Margin** | ₹${(finalState?.entryMargin || appLogMargin || 350000).toLocaleString('en-IN')} |`,
+    `| **Return on Margin** | ${(finalState?.entryMargin || appLogMargin) ? ((finalPnL / (finalState?.entryMargin || appLogMargin)) * 100).toFixed(2) : '0.00'}% |`,
     ``,
   ];
 
@@ -275,7 +359,8 @@ async function generateReport() {
     for (const snap of snapshots) {
       const time = snap.ist.split(',')[1]?.trim() || snap.ist;
       const snapSpot = snap.spot || snap.niftySpot;
-      report.push(`| ${time} | ₹${snapSpot.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | ${snap.totalPnL >= 0 ? '🟢' : '🔴'} ₹${snap.totalPnL.toFixed(2)} |`);
+      const spotCell = snapSpot ? `₹${snapSpot.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—';
+      report.push(`| ${time} | ${spotCell} | ${snap.totalPnL >= 0 ? '🟢' : '🔴'} ₹${snap.totalPnL.toFixed(2)} |`);
     }
     report.push(``);
   }
@@ -294,6 +379,10 @@ async function generateReport() {
     report.push(`Sensex moved from ₹${entrySpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} to ₹${finalSpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} (${changePct}% change) on the expiry day.`);
   } else {
     report.push(`Nifty moved from ₹${entrySpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} to ₹${finalSpot.toLocaleString('en-IN', { maximumFractionDigits: 2 })} on the expiry day.`);
+  }
+
+  if (mtmAll.length > 0) {
+    report.push(`Final P&L and intraday timeline sourced from the app's exit notification and minute-level MTM log (no 15-min snapshots captured today).`);
   }
   
   report.push(``);
