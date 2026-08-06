@@ -185,11 +185,11 @@ export async function runBacktest(config: BacktestConfig) {
         logger.info(`Closed Trade (SL) at ${timestamp} | PnL: ₹${currentPnl.toFixed(2)}`);
         activeTrade = null;
       }
-      // Check 03:20 PM Expiry Market Close Exit
-      else if (timeClean === '15:20') {
+      // Check 03:27 PM Expiry Market Close Exit
+      else if (timeClean === '15:27') {
         activeTrade.status = 'CLOSED';
         activeTrade.exitTime = timestamp;
-        activeTrade.exitReason = 'Market Close Square-Off (15:20)';
+        activeTrade.exitReason = 'Market Close Square-Off (15:27)';
         activeTrade.pnl = currentPnl;
         completedTrades.push({ ...activeTrade });
         logger.info(

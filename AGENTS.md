@@ -30,7 +30,7 @@ Two related automated options trading systems using Angel One SmartAPI:
 - **Crons registered at boot** via `node-cron` (IST timezone):
   - 08:30 — Scrip master download (expiry days only)
   - 09:20 — Strategy entry (expiry days)
-  - 15:30 — Market close square-off
+  - 15:27 — Market close square-off
   - Every minute — MTM logging (Monday - Friday)
 - **Monitoring** — SmartStream WebSocket (real-time tick stream), stop-loss at 1% of margin
 - **Entry flow:** Login → Get spot LTP → Find ATM strikes → Buy 1 lot ATM CE + PE → Find hedge strikes at 1/3 premium → Sell 3 lots each → Save position
@@ -136,9 +136,9 @@ Same SmartAPI credentials + `LOTS=1`.
 | Event | Day | Time IST | Index |
 |-------|-----|----------|-------|
 | Entry | Tuesday | 09:20 | Nifty |
-| Exit | Tuesday | 15:30 | Nifty |
+| Exit | Tuesday | 15:27 | Nifty |
 | Entry | Thursday | 09:20 | SENSEX |
-| Exit | Thursday | 15:30 | SENSEX |
+| Exit | Thursday | 15:27 | SENSEX |
 | BankNifty Entry | First trading day after previous month's last Tue | 09:30+ | BankNifty |
 | BankNifty Exit | Last Tuesday of month | 15:15 | BankNifty |
 
