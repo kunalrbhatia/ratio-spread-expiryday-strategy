@@ -169,7 +169,9 @@ const bootstrap = async () => {
     cron.schedule(
       `${reportMinute} ${reportHour} * * 1-5`,
       async () => {
-        logger.info(`Cron triggered: Checking for post-expiry report generation (${env.REPORT_TIME})...`);
+        logger.info(
+          `Cron triggered: Checking for post-expiry report generation (${env.REPORT_TIME})...`,
+        );
         const today = new Date();
         const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
         const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
