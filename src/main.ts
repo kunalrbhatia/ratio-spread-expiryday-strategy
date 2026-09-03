@@ -11,6 +11,7 @@ import { positionStores } from './store/positionStore.js';
 import { startTelegramBot } from './telegram/bot.js';
 import { startExpressServer } from './server.js';
 import { isPaperMode } from './helpers/modeManager.js';
+import { env } from './config/env.js';
 import { startMtmLogging } from './jobs/mtmLogger.js';
 
 const BOOTSTRAP_TIMEZONE = 'Asia/Kolkata';
@@ -124,11 +125,13 @@ const bootstrap = async () => {
       },
     );
 
-    // Cron C: Expiry strategy exit / market close (03:27 PM, Monday - Friday)
+    // Cron C: Expiry strategy exit / market close (configurable via EXIT_TIME)
+    const [exitHour, exitMinute] = env.EXIT_TIME.split(':').map(Number);
+    const [reportHour, reportMinute] = env.REPORT_TIME.split(':').map(Number);
     cron.schedule(
-      '27 15 * * 1-5',
+      `${exitMinute} ${exitHour} * * 1-5`,
       async () => {
-        logger.info('Cron triggered: Checking for market close square-off (03:27 PM)...');
+        logger.info(`Cron triggered: Checking for market close square-off (${env.EXIT_TIME})...`);
         const today = new Date();
         const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
         const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
@@ -141,14 +144,14 @@ const bootstrap = async () => {
           if (isNiftyExpiry) {
             const positions = positionStores.NIFTY.getPositions();
             if (positions.active) {
-              await exitAllPositions('NIFTY', 'Market close square-off (03:27 PM)');
+              await exitAllPositions('NIFTY', `Market close square-off (${env.EXIT_TIME})`);
             }
           }
 
           if (isSensexExpiry) {
             const positions = positionStores.SENSEX.getPositions();
             if (positions.active) {
-              await exitAllPositions('SENSEX', 'Market close square-off (03:27 PM)');
+              await exitAllPositions('SENSEX', `Market close square-off (${env.EXIT_TIME})`);
             }
           }
         } else {
@@ -164,9 +167,11 @@ const bootstrap = async () => {
 
     // Cron D: Post-expiry report generation (03:40 PM, Monday - Friday)
     cron.schedule(
-      '40 15 * * 1-5',
+      `${reportMinute} ${reportHour} * * 1-5`,
       async () => {
-        logger.info('Cron triggered: Checking for post-expiry report generation (03:40 PM)...');
+        logger.info(
+          `Cron triggered: Checking for post-expiry report generation (${env.REPORT_TIME})...`,
+        );
         const today = new Date();
         const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
         const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);

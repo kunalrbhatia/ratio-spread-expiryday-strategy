@@ -48,6 +48,11 @@ SLACK_WEBHOOK_URL=your_incoming_webhook_url
 
 # Strategy Options
 ENABLE_SENSEX_EXPIRY=true
+
+# Market-close square-off time (HH:MM, 24h IST) — defaults to 14:59
+EXIT_TIME=14:59
+# Post-expiry report generation time (HH:MM, 24h IST) — defaults to 15:40
+REPORT_TIME=15:40
 ```
 
 

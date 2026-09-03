@@ -16,6 +16,10 @@ export interface Env {
   SLACK_WEBHOOK_URL?: string;
   SLACK_SIGNING_SECRET?: string;
   ENABLE_SENSEX_EXPIRY: boolean;
+  /** Market-close square-off time (HH:MM, 24h IST) — e.g. "14:59" */
+  EXIT_TIME: string;
+  /** Post-expiry report generation time (HH:MM, 24h IST) — e.g. "15:40" */
+  REPORT_TIME: string;
 }
 
 const getEnvOrThrow = (key: string, defaultValue?: string): string => {
@@ -51,6 +55,8 @@ export const env: Env = {
   USE_TELEGRAM: getEnvBool('USE_TELEGRAM', 'true'),
   USE_SLACK: getEnvBool('USE_SLACK', 'false'),
   ENABLE_SENSEX_EXPIRY: getEnvBool('ENABLE_SENSEX_EXPIRY', 'true'),
+  EXIT_TIME: getEnvOrThrow('EXIT_TIME', '14:59'),
+  REPORT_TIME: getEnvOrThrow('REPORT_TIME', '15:40'),
 };
 
 if (env.USE_TELEGRAM) {
