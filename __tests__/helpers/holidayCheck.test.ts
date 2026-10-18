@@ -1,11 +1,26 @@
+import { jest } from '@jest/globals';
+import fs from 'fs';
 import {
   isWeekend,
   isNSEHoliday,
   isExpiryDayForSymbol,
   extractExpiryFromSymbol,
+  loadHolidays,
+  resetHolidaysCache,
+  isTradingDay,
 } from '../../src/helpers/holidayCheck.js';
 
 describe('holidayCheck helper', () => {
+  beforeEach(() => {
+    resetHolidaysCache();
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    resetHolidaysCache();
+    jest.restoreAllMocks();
+  });
+
   describe('isWeekend', () => {
     it('should return true for Saturday and Sunday', () => {
       expect(isWeekend(new Date('2026-06-27'))).toBe(true); // Saturday
@@ -17,13 +32,44 @@ describe('holidayCheck helper', () => {
     });
   });
 
-  describe('isNSEHoliday', () => {
+  describe('isNSEHoliday and loadHolidays', () => {
     it('should return true for Republic Day', () => {
       expect(isNSEHoliday(new Date('2026-01-26'))).toBe(true);
     });
 
     it('should return false for a regular trading day', () => {
       expect(isNSEHoliday(new Date('2026-06-29'))).toBe(false);
+    });
+
+    it('should alert and return true if year is missing from holidays', () => {
+      // Date in year 2029 where holidays are missing
+      const date2029 = new Date('2029-06-15');
+      expect(isNSEHoliday(date2029)).toBe(true);
+    });
+
+    it('should handle file not existing gracefully', () => {
+      jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+      resetHolidaysCache();
+      const holidays = loadHolidays();
+      expect(holidays).toEqual({});
+    });
+
+    it('should handle readFileSync throwing error gracefully', () => {
+      jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+      jest.spyOn(fs, 'readFileSync').mockImplementation(() => {
+        throw new Error('Disk read error');
+      });
+      resetHolidaysCache();
+      const holidays = loadHolidays();
+      expect(holidays).toEqual({});
+    });
+  });
+
+  describe('isTradingDay', () => {
+    it('should return true for normal trading day and false for weekend/holiday', () => {
+      expect(isTradingDay(new Date('2026-06-29'))).toBe(true);
+      expect(isTradingDay(new Date('2026-06-28'))).toBe(false); // weekend
+      expect(isTradingDay(new Date('2026-01-26'))).toBe(false); // holiday
     });
   });
 
@@ -71,6 +117,16 @@ describe('holidayCheck helper', () => {
     });
   });
 
+  describe('isExpiryDayForSymbol - BANKNIFTY', () => {
+    it('should return true for normal Wednesday expiry', () => {
+      expect(isExpiryDayForSymbol('BANKNIFTY', new Date('2026-07-01'))).toBe(true); // Wednesday
+    });
+
+    it('should return false for Tuesday', () => {
+      expect(isExpiryDayForSymbol('BANKNIFTY', new Date('2026-06-30'))).toBe(false);
+    });
+  });
+
   describe('extractExpiryFromSymbol', () => {
     it('should extract correct date from weekly SENSEX options', () => {
       const date = extractExpiryFromSymbol('SENSEX2671677400CE');
@@ -101,6 +157,10 @@ describe('holidayCheck helper', () => {
     it('should return null for invalid option symbols', () => {
       expect(extractExpiryFromSymbol('INVALID_SYMBOL')).toBeNull();
       expect(extractExpiryFromSymbol('NIFTY26JL24300CE')).toBeNull(); // invalid month code
+    });
+
+    it('should handle exceptions in regex matching gracefully', () => {
+      expect(extractExpiryFromSymbol(null as any)).toBeNull();
     });
   });
 });

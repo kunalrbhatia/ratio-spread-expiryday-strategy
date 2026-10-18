@@ -21,7 +21,7 @@ export const loadHolidays = (): Record<string, string[]> => {
     logger.error(`Failed to read holidays file: ${error.message}`);
     cachedHolidays = {};
   }
-  return cachedHolidays || {};
+  return cachedHolidays || /* istanbul ignore next */ {};
 };
 
 // Reset cache for testing

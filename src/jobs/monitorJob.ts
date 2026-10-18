@@ -48,15 +48,17 @@ export const exitAllPositions = async (
     const succeededLegs: OptionLeg[] = [];
     const failedLegs: OptionLeg[] = [];
 
-    // Fetch latest LTPs to ensure we have the most accurate prices
+    // In live mode, fetch latest LTPs to ensure we have the most accurate prices
     let ltpMap = new Map<string, number>();
-    try {
-      ltpMap = await getOptionLtps(
-        positions.legs.map((l) => l.token),
-        symbol,
-      );
-    } catch (err: any) {
-      logger.error(`Failed to fetch latest LTPs before exit for ${symbol}: ${err.message}`);
+    if (!isPaperMode()) {
+      try {
+        ltpMap = await getOptionLtps(
+          positions.legs.map((l) => l.token),
+          symbol,
+        );
+      } catch (err: any) {
+        logger.error(`Failed to fetch latest LTPs before exit for ${symbol}: ${err.message}`);
+      }
     }
 
     // Execute exit orders for each leg
