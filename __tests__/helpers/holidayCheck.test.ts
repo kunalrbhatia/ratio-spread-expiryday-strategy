@@ -1,8 +1,6 @@
-import { env } from '../../src/config/env.js';
 import {
   isWeekend,
   isNSEHoliday,
-  isExpiryDay,
   isExpiryDayForSymbol,
   extractExpiryFromSymbol,
 } from '../../src/helpers/holidayCheck.js';
@@ -29,27 +27,27 @@ describe('holidayCheck helper', () => {
     });
   });
 
-  describe('isExpiryDay', () => {
+  describe('isExpiryDayForSymbol - NIFTY', () => {
     it('should return true for normal Tuesday expiry', () => {
-      expect(isExpiryDay(new Date('2026-06-30'))).toBe(true); // Tuesday, normal day
+      expect(isExpiryDayForSymbol('NIFTY', new Date('2026-06-30'))).toBe(true); // Tuesday, normal day
     });
 
     it('should return false for regular Wednesday', () => {
-      expect(isExpiryDay(new Date('2026-07-01'))).toBe(false);
+      expect(isExpiryDayForSymbol('NIFTY', new Date('2026-07-01'))).toBe(false);
     });
 
     it('should return true for Monday if Tuesday is holiday', () => {
       // 2026-02-17 is Mahashivratri (Tuesday holiday)
       // So 2026-02-16 (Monday) should be the expiry day
-      expect(isExpiryDay(new Date('2026-02-16'))).toBe(true);
+      expect(isExpiryDayForSymbol('NIFTY', new Date('2026-02-16'))).toBe(true);
     });
 
     it('should return false on Monday if Tuesday is NOT holiday', () => {
-      expect(isExpiryDay(new Date('2026-06-29'))).toBe(false); // Tuesday is not holiday
+      expect(isExpiryDayForSymbol('NIFTY', new Date('2026-06-29'))).toBe(false); // Tuesday is not holiday
     });
 
     it('should return false on weekend', () => {
-      expect(isExpiryDay(new Date('2026-06-28'))).toBe(false);
+      expect(isExpiryDayForSymbol('NIFTY', new Date('2026-06-28'))).toBe(false);
     });
   });
 
@@ -70,15 +68,6 @@ describe('holidayCheck helper', () => {
 
     it('should return false on Thursday if it is a holiday', () => {
       expect(isExpiryDayForSymbol('SENSEX', new Date('2026-06-25'))).toBe(false);
-    });
-
-    it('should return false for SENSEX expiry when ENABLE_SENSEX_EXPIRY is false', () => {
-      env.ENABLE_SENSEX_EXPIRY = false;
-      try {
-        expect(isExpiryDayForSymbol('SENSEX', new Date('2026-06-18'))).toBe(false);
-      } finally {
-        env.ENABLE_SENSEX_EXPIRY = true;
-      }
     });
   });
 

@@ -4,6 +4,7 @@ import path from 'path';
 import { positionStores } from '../store/positionStore.js';
 import { calculateCurrentPnL } from './monitorJob.js';
 import { logger } from '../helpers/logger.js';
+import { getActiveStrategy } from '../strategy/index.js';
 
 export const formatMtmTimestamp = (date?: Date): string => {
   const d = date || new Date();
@@ -21,7 +22,7 @@ export const formatMtmTimestamp = (date?: Date): string => {
     .toLowerCase();
 };
 
-export const writeMtmSnapshot = (symbol: 'NIFTY' | 'SENSEX', now?: Date): void => {
+export const writeMtmSnapshot = (symbol: string, now?: Date): void => {
   try {
     const d = now || new Date();
     const store = positionStores[symbol];
@@ -54,8 +55,11 @@ export const startMtmLogging = (): void => {
   cron.schedule(
     '* * * * 1-5',
     () => {
-      writeMtmSnapshot('NIFTY');
-      writeMtmSnapshot('SENSEX');
+      const strategy = getActiveStrategy();
+      const instruments = strategy.instruments || ['NIFTY'];
+      for (const symbol of instruments) {
+        writeMtmSnapshot(symbol);
+      }
     },
     {
       timezone: 'Asia/Kolkata',

@@ -3,28 +3,23 @@ import { ordersHelper } from '../helpers/orders.js';
 import { smartStream, TickData } from '../helpers/websocket.js';
 import { notifierHelper } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
-import { INDEX_CONFIGS } from '../helpers/constants.js';
-import { isPanicSwitchActive } from '../helpers/modeManager.js';
+import { INDEX_CONFIGS, SupportedIndex } from '../helpers/constants.js';
+import { isPanicSwitchActive, isPaperMode } from '../helpers/modeManager.js';
 import { getOptionLtps } from '../helpers/marketData.js';
+import { getActiveStrategy } from '../strategy/index.js';
 
-const isExiting: Record<'NIFTY' | 'SENSEX', boolean> = {
-  NIFTY: false,
-  SENSEX: false,
-};
+const isExiting: Record<string, boolean> = {};
 
 export const exitAllPositions = async (
-  symbolOrReason: 'NIFTY' | 'SENSEX' | string,
+  symbolOrReason: string,
   maybeReason?: string,
 ): Promise<boolean> => {
-  let symbol: 'NIFTY' | 'SENSEX' = 'NIFTY';
+  let symbol = 'NIFTY';
   let reason = symbolOrReason;
 
-  if (symbolOrReason === 'NIFTY' || symbolOrReason === 'SENSEX') {
+  if (maybeReason !== undefined) {
     symbol = symbolOrReason;
-    reason = maybeReason || '';
-  } else {
-    symbol = 'NIFTY';
-    reason = symbolOrReason;
+    reason = maybeReason;
   }
 
   if (isPanicSwitchActive()) {
@@ -48,11 +43,12 @@ export const exitAllPositions = async (
       return false;
     }
 
-    const config = INDEX_CONFIGS[symbol];
+    const config = INDEX_CONFIGS[symbol as SupportedIndex];
+    const optionExchange = config ? config.optionExchange : 'NFO';
     const succeededLegs: OptionLeg[] = [];
     const failedLegs: OptionLeg[] = [];
 
-    // Fetch latest LTPs to ensure we have the most accurate prices for our filter
+    // Fetch latest LTPs to ensure we have the most accurate prices
     let ltpMap = new Map<string, number>();
     try {
       ltpMap = await getOptionLtps(
@@ -66,10 +62,10 @@ export const exitAllPositions = async (
     // Execute exit orders for each leg
     for (const leg of positions.legs) {
       const currentPrice = ltpMap.get(leg.token) ?? leg.currentPrice ?? leg.entryPremium;
-      leg.currentPrice = currentPrice; // Ensure the P&L calculation has the latest price
+      leg.currentPrice = currentPrice;
 
-      // Only check the < 5 condition during scheduled market close square-off
-      const isMarketClose = reason.includes('Market close square-off');
+      // Skip worthless options (< ₹5.0) during scheduled market close square-off to save brokerage
+      const isMarketClose = reason.toLowerCase().includes('market close square-off');
       if (isMarketClose && currentPrice < 5) {
         logger.info(
           `[${symbol}] Skipping exit for worthless leg ${leg.symbol} (${leg.token}) as LTP is ₹${currentPrice} (< ₹5.0)`,
@@ -86,7 +82,7 @@ export const exitAllPositions = async (
           symboltoken: leg.token,
           transactiontype: exitTxType,
           quantity: leg.qty,
-          exchange: config.optionExchange,
+          exchange: optionExchange,
         });
         succeededLegs.push(leg);
         smartStream.unsubscribe([leg.token], symbol);
@@ -149,18 +145,15 @@ export const calculateCurrentPnL = (legs: OptionLeg[]): number => {
   return totalPnL;
 };
 
-export const handleIncomingTick = async (
-  symbolOrTick: 'NIFTY' | 'SENSEX' | TickData,
-  maybeTick?: TickData,
-) => {
+export const handleIncomingTick = async (symbolOrTick: string | TickData, maybeTick?: TickData) => {
   if (isPanicSwitchActive()) {
     return;
   }
 
-  let symbol: 'NIFTY' | 'SENSEX' = 'NIFTY';
+  let symbol = 'NIFTY';
   let tick: TickData;
 
-  if (symbolOrTick === 'NIFTY' || symbolOrTick === 'SENSEX') {
+  if (typeof symbolOrTick === 'string') {
     symbol = symbolOrTick;
     tick = maybeTick!;
   } else {
@@ -180,28 +173,52 @@ export const handleIncomingTick = async (
     if (leg.token === tick.token) {
       leg.currentPrice = tick.ltp;
       legFound = true;
-      // Mutate private state inside the store directly
       store.updateLegPrice(tick.token, tick.ltp);
     }
   }
 
   if (!legFound) return;
 
-  // Calculate current P&L using the updated legs
   const currentPnL = calculateCurrentPnL(positions.legs);
 
-  // Stop Loss is 1% of entry margin
+  // 1. Core Stop Loss check
   if (currentPnL <= -positions.stopLoss) {
     logger.warn(
       `[${symbol}] Stop loss hit! Current P&L: ₹${currentPnL} <= SL threshold: -₹${positions.stopLoss}`,
     );
-    await exitAllPositions(symbol, `Stop Loss hit of 1% (P&L: ₹${currentPnL.toFixed(2)})`);
+    await exitAllPositions(
+      symbol,
+      `Stop Loss threshold hit (P&L: ₹${currentPnL.toFixed(2)} <= -₹${positions.stopLoss.toFixed(2)})`,
+    );
+    return;
+  }
+
+  // 2. Delegate to active Strategy for custom onTick decision (take profit, trailing SL, etc.)
+  try {
+    const strategy = getActiveStrategy();
+    if (strategy.onTick) {
+      const decision = await strategy.onTick(
+        { symbol, isPaper: isPaperMode() },
+        tick,
+        currentPnL,
+        positions.legs,
+      );
+
+      if (decision && decision.shouldExit) {
+        logger.info(`[${symbol}] Strategy requested exit: ${decision.reason}`);
+        await exitAllPositions(symbol, `Strategy Signal: ${decision.reason}`);
+      }
+    }
+  } catch (err: any) {
+    logger.error(`Error in strategy onTick for ${symbol}: ${err.message}`);
   }
 };
 
-// Route incoming ticks to NIFTY or SENSEX depending on active positions
 export const routeTick = (tick: TickData) => {
-  for (const symbol of ['NIFTY', 'SENSEX'] as const) {
+  const strategy = getActiveStrategy();
+  const instruments = strategy.instruments || ['NIFTY'];
+
+  for (const symbol of instruments) {
     const store = positionStores[symbol];
     const positions = store.getPositions();
     if (positions.active && positions.legs.some((leg) => leg.token === tick.token)) {
@@ -210,7 +227,7 @@ export const routeTick = (tick: TickData) => {
   }
 };
 
-export const startContinuousMonitoring = (symbol: 'NIFTY' | 'SENSEX' = 'NIFTY') => {
+export const startContinuousMonitoring = (symbol = 'NIFTY') => {
   if (isPanicSwitchActive()) {
     logger.warn(`Skipping continuous monitoring startup for ${symbol}: Panic Switch is active.`);
     return;

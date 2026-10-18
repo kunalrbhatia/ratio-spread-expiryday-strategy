@@ -5,6 +5,10 @@ dotenv.config();
 export interface Env {
   PORT: number;
   NODE_ENV: string;
+  STRATEGY: string;
+  PAPER_MODE: boolean;
+  STOP_LOSS_PERCENT: number;
+  STOP_LOSS_MODE: 'MARGIN' | 'FIXED';
   API_KEY: string;
   CLIENT_CODE: string;
   CLIENT_PIN: string;
@@ -15,7 +19,6 @@ export interface Env {
   USE_SLACK: boolean;
   SLACK_WEBHOOK_URL?: string;
   SLACK_SIGNING_SECRET?: string;
-  ENABLE_SENSEX_EXPIRY: boolean;
 }
 
 const getEnvOrThrow = (key: string, defaultValue?: string): string => {
@@ -33,7 +36,7 @@ const getEnvBool = (key: string, defaultValue = 'false'): boolean => {
 
 const getEnvNumber = (key: string, defaultValue: string): number => {
   const val = getEnvOrThrow(key, defaultValue);
-  const parsed = parseInt(val, 10);
+  const parsed = parseFloat(val);
   if (isNaN(parsed)) {
     throw new Error(`Environment variable ${key} must be a number`);
   }
@@ -44,13 +47,17 @@ const getEnvNumber = (key: string, defaultValue: string): number => {
 export const env: Env = {
   PORT: getEnvNumber('PORT', '3000'),
   NODE_ENV: getEnvOrThrow('NODE_ENV', 'development'),
-  API_KEY: getEnvOrThrow('API_KEY'),
-  CLIENT_CODE: getEnvOrThrow('CLIENT_CODE'),
-  CLIENT_PIN: getEnvOrThrow('CLIENT_PIN'),
-  CLIENT_TOTP_PIN: getEnvOrThrow('CLIENT_TOTP_PIN'),
-  USE_TELEGRAM: getEnvBool('USE_TELEGRAM', 'true'),
+  STRATEGY: getEnvOrThrow('STRATEGY', 'example'),
+  PAPER_MODE: getEnvBool('PAPER_MODE', 'true'), // Default to paper mode for safety
+  STOP_LOSS_PERCENT: getEnvNumber('STOP_LOSS_PERCENT', '1.0'),
+  STOP_LOSS_MODE: (process.env.STOP_LOSS_MODE === 'FIXED' ? 'FIXED' : 'MARGIN') as
+    'MARGIN' | 'FIXED',
+  API_KEY: getEnvOrThrow('API_KEY', 'MOCK_API_KEY'),
+  CLIENT_CODE: getEnvOrThrow('CLIENT_CODE', 'MOCK_CLIENT_CODE'),
+  CLIENT_PIN: getEnvOrThrow('CLIENT_PIN', '0000'),
+  CLIENT_TOTP_PIN: getEnvOrThrow('CLIENT_TOTP_PIN', 'MOCK_TOTP_SEED'),
+  USE_TELEGRAM: getEnvBool('USE_TELEGRAM', 'false'),
   USE_SLACK: getEnvBool('USE_SLACK', 'false'),
-  ENABLE_SENSEX_EXPIRY: getEnvBool('ENABLE_SENSEX_EXPIRY', 'true'),
 };
 
 if (env.USE_TELEGRAM) {

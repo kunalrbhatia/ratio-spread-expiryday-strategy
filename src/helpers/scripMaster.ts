@@ -2,9 +2,9 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
-import { CONSTANTS } from './constants.js';
-
+import { CONSTANTS, INDEX_CONFIGS, SupportedIndex } from './constants.js';
 import { requestWithRetry } from './api.js';
+import { isExpiryDayForSymbol } from './holidayCheck.js';
 
 export interface ScripItem {
   token: string;
@@ -18,11 +18,8 @@ export interface ScripItem {
   tick_size: string;
 }
 
-import { INDEX_CONFIGS } from './constants.js';
-import { isExpiryDayForSymbol } from './holidayCheck.js';
-
 export const getNextWeeklyExpiryDate = (
-  symbol: 'NIFTY' | 'SENSEX',
+  symbol: SupportedIndex | string,
   fromDate: Date = new Date(),
 ): string => {
   const date = new Date(fromDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
@@ -30,7 +27,7 @@ export const getNextWeeklyExpiryDate = (
   for (let i = 0; i < 8; i++) {
     const checkDate = new Date(date);
     checkDate.setDate(date.getDate() + i);
-    if (isExpiryDayForSymbol(symbol, checkDate)) {
+    if (isExpiryDayForSymbol(symbol as any, checkDate)) {
       return formatScripExpiryDate(checkDate);
     }
   }
@@ -38,7 +35,7 @@ export const getNextWeeklyExpiryDate = (
 };
 
 // Formats date to DDMMMYYYY (e.g. 15JUL2026) matching Angel One format (all uppercase month)
-const formatScripExpiryDate = (date: Date): string => {
+export const formatScripExpiryDate = (date: Date): string => {
   const day = String(date.getDate()).padStart(2, '0');
   const months = [
     'JAN',
@@ -60,10 +57,10 @@ const formatScripExpiryDate = (date: Date): string => {
 };
 
 export const downloadAndCacheScripMaster = async (
-  symbol: 'NIFTY' | 'SENSEX' = 'NIFTY',
+  symbol: SupportedIndex | string = 'NIFTY',
 ): Promise<boolean> => {
   try {
-    logger.info(`Downloading Angel One scrip master header for ${symbol}...`);
+    logger.info(`Downloading Angel One scrip master headers for ${symbol}...`);
     const response = await requestWithRetry(() =>
       axios({
         method: 'GET',
@@ -83,16 +80,18 @@ export const downloadAndCacheScripMaster = async (
     const nextExpiry = getNextWeeklyExpiryDate(symbol);
     logger.info(`Target weekly expiry date for ${symbol}: ${nextExpiry}`);
 
-    const config = INDEX_CONFIGS[symbol];
+    const config = INDEX_CONFIGS[symbol as SupportedIndex];
+    if (!config) {
+      throw new Error(`Unsupported instrument config for ${symbol}`);
+    }
 
     // Filter contracts
     const filtered: ScripItem[] = response.data.filter((item: ScripItem) => {
-      return (
-        item.name === config.symbol &&
-        item.exch_seg === config.optionExchange &&
-        item.instrumenttype === 'OPTIDX' &&
-        item.expiry === nextExpiry
-      );
+      const matchesSymbol = item.name === config.symbol;
+      const matchesExchange = item.exch_seg === config.optionExchange;
+      const matchesType = item.instrumenttype === 'OPTIDX';
+      const matchesExpiry = nextExpiry ? item.expiry === nextExpiry : true;
+      return matchesSymbol && matchesExchange && matchesType && matchesExpiry;
     });
 
     const cachePath = path.join(process.cwd(), 'data', `scrip-master-${symbol.toLowerCase()}.json`);
@@ -112,7 +111,7 @@ export const downloadAndCacheScripMaster = async (
   }
 };
 
-export const getCachedScrips = (symbol: 'NIFTY' | 'SENSEX' = 'NIFTY'): ScripItem[] => {
+export const getCachedScrips = (symbol: SupportedIndex | string = 'NIFTY'): ScripItem[] => {
   const cachePath = path.join(process.cwd(), 'data', `scrip-master-${symbol.toLowerCase()}.json`);
   if (fs.existsSync(cachePath)) {
     return JSON.parse(fs.readFileSync(cachePath, 'utf-8'));

@@ -1,146 +1,213 @@
-# Nifty Option Ratio Spread Expiry Strategy
+# Algo-Trading Skeleton (Angel One SmartAPI)
 
-An automated weekly options trading strategy for Nifty 50 options. The strategy runs exclusively on expiry days (normally Tuesdays, or Mondays if Tuesday is an NSE trading holiday), entering positions at 09:20 AM IST and managing risk dynamically using real-time WebSocket pricing. Alerting notifications can be sent to Telegram and/or Slack, or fully disabled by setting both `USE_TELEGRAM` and `USE_SLACK` flags to `false`.
+A modular, production-ready algo-trading skeleton built for Angel One SmartAPI using TypeScript, Node 22, and PM2.
 
-## Strategy Logic
-
-### 1. Entry (09:20 AM IST)
-* Spot LTP is retrieved using the modern Angel One quote API (`/rest/secure/angelbroking/market/v1/quote`).
-* Buy **1 Lot** of ATM Call (CE) option.
-* Buy **1 Lot** of ATM Put (PE) option.
-* Record the exact premium paid for each: $P_{CE\_Buy}$ and $P_{PE\_Buy}$.
-
-### 2. Hedge Adjustment (Sell Side)
-Immediately after entry, execute:
-* **Call side**: Scan CE chain for strike closest to $\frac{P_{CE\_Buy}}{3}$ and sell **3 Lots**.
-* **Put side**: Scan PE chain for strike closest to $\frac{P_{PE\_Buy}}{3}$ and sell **3 Lots**.
-
-### 3. Position Management
-* Retreive utilized margin block from Angel One.
-* Set Stop-Loss at **1% of entry margin**.
-* Stream option prices in real-time over the updated Angel One SmartStream WebSocket protocol (`wss://smartapisocket.angelone.in/smart-stream`). If combined loss hits 1% of margin at any point, exit all positions immediately.
-* If SL is not hit, hold and square off at **03:27 PM IST** (market close). To save on brokerage fees, any option leg whose LTP is less than ₹5.0 at square-off is allowed to expire worthless instead of placing a close order.
+This repository provides all execution infrastructure (authentication, throttling, WebSocket feeds, position persistence, real-time stop-loss monitoring, multi-leg emergency exits, MTM logging, health endpoints, and Telegram alerts) while keeping strategies completely decoupled through a clean seam in `src/strategy/`.
 
 ---
 
-## Environment Setup
+## Features & Infrastructure
 
-Create a `.env` file in the root directory (refer to `.env.example`):
+- **SmartAPI Authentication**: Automated login with TOTP (`src/helpers/login.ts`).
+- **Synchronized API Queue**: 1000ms rate-limit throttle, backoff retries, 8s timeout, order placement excluded from blind retries, dynamic public/local IP and MAC headers (`src/helpers/api.ts`).
+- **SmartStream V2 WebSocket**: Correct binary packet parsing (token bytes 2–27, LTP bytes 43–50), raw JWT headers, auto-reconnect with session refresh, and paper-mode mock tick generator (`src/helpers/websocket.ts`).
+- **Configurable Holidays & Schedules**: Trading calendar loaded from `data/holidays.json` with backward holiday shift detection and loud missing-year alerts (`src/helpers/holidayCheck.ts`).
+- **Position Tracking & Monitoring**: Individual position files per symbol, per-leg fill confirmations, `isExiting` re-entrancy lock, manual intervention emergency alerts (`src/jobs/monitorJob.ts`).
+- **Configurable Stop-Loss**: Configurable SL percentage (`STOP_LOSS_PERCENT`, default: 1% of entry margin) with custom strategy overrides.
+- **Safety Flags**: Non-blocking Paper Mode (`.paper`), Entry Kill Switch (`.kill`), and All-Halt Panic Switch (`.panic`) (`src/helpers/modeManager.ts`).
+- **Telegram Bot & Alerts**: Authorized Telegram bot (`/status`, `/paper`, `/kill`, `/panic`, `/update`, `/logs`), Slack webhook support, and Express `/health` monitoring route.
+- **SmartAPI Quirks Cataloged**: See [docs/smartapi-quirks.md](docs/smartapi-quirks.md).
 
-```env
-PORT=3000
-NODE_ENV=production
+---
 
-# Angel One SmartAPI Credentials
-API_KEY=your_api_key
+## Project Structure
+
+```text
+├── src/
+│   ├── config/env.ts              # Strongly typed environment configuration
+│   ├── helpers/
+│   │   ├── api.ts                 # Axios wrapper, 1s throttle, retries, headers
+│   │   ├── constants.ts           # INDEX_CONFIGS (NIFTY, SENSEX, BANKNIFTY)
+│   │   ├── holidayCheck.ts        # Trading calendar and holiday verification
+│   │   ├── logger.ts              # Winston daily-rotate log manager
+│   │   ├── login.ts               # SmartAPI password & TOTP login
+│   │   ├── marketData.ts          # Spot quotes, ATM strike, batch option LTPs
+│   │   ├── modeManager.ts         # Paper / Kill / Panic flag managers
+│   │   ├── orders.ts              # SmartAPI order placement & batch margin API
+│   │   ├── scripMaster.ts         # Scrip master downloader & contract cache
+│   │   └── websocket.ts           # SmartStream client (real & mock ticks)
+│   ├── jobs/
+│   │   ├── entryJob.ts            # Entry orchestrator (delegates to Strategy)
+│   │   ├── monitorJob.ts          # Tick router, P&L, SL check, exit executor
+│   │   └── mtmLogger.ts           # 1-minute MTM snapshot logger
+│   ├── store/
+│   │   ├── positionStore.ts       # Position persistence per instrument
+│   │   └── sessionStore.ts        # SmartAPI JWT and feed token memory store
+│   ├── strategy/
+│   │   ├── Strategy.ts            # Strategy interface definition
+│   │   ├── ExampleStrategy.ts     # Reference stub with clear TODOs
+│   │   └── index.ts               # Strategy registry & active loader
+│   ├── main.ts                    # Bootstrap and cron scheduler
+│   ├── notifier.ts                # Telegram & Slack notification dispatcher
+│   └── server.ts                  # Express health endpoint
+├── data/
+│   └── holidays.json              # Configurable NSE trading holidays by year
+├── docs/
+│   ├── smartapi-quirks.md         # Reference of known Angel One SmartAPI nuances
+│   └── using-this-template.md     # GitHub template setup and upstream sync guide
+└── __tests__/                     # Unit & integration tests
+```
+
+---
+
+## Quick Start
+
+### 1. Install Dependencies
+```bash
+pnpm install
+```
+
+### 2. Configure Environment
+```bash
+cp .env.example .env
+```
+Fill in your Angel One credentials in `.env`:
+```ini
+API_KEY=your_smartapi_key
 CLIENT_CODE=your_client_code
 CLIENT_PIN=your_client_pin
-CLIENT_TOTP_PIN=your_totp_seed_secret
-
-# Telegram Bot (Primary)
-USE_TELEGRAM=true
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-
-# Slack Webhook (Fallback Alerting)
-USE_SLACK=true
-SLACK_WEBHOOK_URL=your_incoming_webhook_url
-
-# Strategy Options
-ENABLE_SENSEX_EXPIRY=true
+CLIENT_TOTP_PIN=your_totp_seed
+STRATEGY=example
+PAPER_MODE=true
 ```
 
+### 3. Run in Paper Mode
+The repository ships with `.paper` mode enabled by default. No real orders are placed.
+```bash
+pnpm dev
+```
+
+Check system status at `http://localhost:3000/health`.
 
 ---
 
-## PM2 Deployment
+## Environment Variables Reference
 
-We use PM2 to manage this strategy on Oracle Cloud Free Tier. Start the app using the provided CJS configuration:
-
-```bash
-pm2 start ecosystem.config.cjs
-```
+| Variable | Description | Default | Required |
+|---|---|---|---|
+| `STRATEGY` | Active strategy name from `src/strategy/` | `example` | Yes |
+| `PAPER_MODE` | Default to mock paper trading | `true` | Yes |
+| `PORT` | Express health route port | `3000` | No |
+| `NODE_ENV` | Environment (`development` / `production`) | `development` | No |
+| `STOP_LOSS_PERCENT` | Default stop loss percentage of margin | `1.0` | No |
+| `API_KEY` | Angel One SmartAPI API key | - | Yes (Live) |
+| `CLIENT_CODE` | Angel One client code | - | Yes (Live) |
+| `CLIENT_PIN` | Angel One account PIN | - | Yes (Live) |
+| `CLIENT_TOTP_PIN` | TOTP secret key for login generation | - | Yes (Live) |
+| `USE_TELEGRAM` | Enable Telegram alert notifications | `false` | No |
+| `TELEGRAM_BOT_TOKEN`| Telegram Bot Token | - | If Telegram on |
+| `TELEGRAM_CHAT_ID` | Telegram authorized user ID | - | If Telegram on |
+| `USE_SLACK` | Enable Slack notifications | `false` | No |
+| `SLACK_WEBHOOK_URL` | Incoming webhook URL for Slack | - | If Slack on |
 
 ---
 
-## Backtesting
+## Writing a New Strategy
 
-Run a low-memory stream backtest against remote option chain datasets (e.g. `nifty-optionchain-data`):
+All strategy logic is isolated inside `src/strategy/`. To add a strategy:
 
-```bash
-pnpm backtest
+### Step 1: Create `src/strategy/MyStrategy.ts`
+Implement the `Strategy` interface from `src/strategy/Strategy.ts`:
+
+```typescript
+import {
+  Strategy,
+  StrategyContext,
+  StrategyExitDecision,
+  StrategySchedule,
+} from './Strategy.js';
+import { OptionLeg } from '../store/positionStore.js';
+import { TickData } from '../helpers/websocket.js';
+import { getSpotLtp, getATMStrike, findATMContracts } from '../helpers/marketData.js';
+import { INDEX_CONFIGS, SupportedIndex } from '../helpers/constants.js';
+
+export class MyStrategy implements Strategy {
+  public readonly name = 'my-strategy';
+  public readonly instruments = ['NIFTY'];
+
+  public readonly schedule: StrategySchedule = {
+    entryTime: '09:20',
+    exitTime: '15:27',
+    scripMasterTime: '08:30',
+    weekdays: [1, 2, 3, 4, 5],
+  };
+
+  public async shouldRunToday(symbol: string, date: Date): Promise<boolean> {
+    return true; // or your custom indicator/expiry logic
+  }
+
+  public async entry(ctx: StrategyContext): Promise<OptionLeg[] | null> {
+    const config = INDEX_CONFIGS[ctx.symbol as SupportedIndex];
+    const spot = await getSpotLtp(ctx.symbol);
+    const atmStrike = getATMStrike(spot, config.strikeStep);
+    const { ce } = findATMContracts(ctx.symbol, atmStrike);
+
+    // Return the legs created
+    return [
+      {
+        symbol: ce.symbol,
+        token: ce.token,
+        entryPremium: 150,
+        qty: config.lotSize,
+        type: 'CE',
+        direction: 'BUY',
+      },
+    ];
+  }
+
+  public async onTick(
+    ctx: StrategyContext,
+    tick: TickData,
+    currentPnL: number,
+  ): Promise<StrategyExitDecision | null> {
+    if (currentPnL >= 2500) {
+      return { shouldExit: true, reason: 'Take Profit of ₹2,500 hit' };
+    }
+    return null;
+  }
+
+  public computeStopLoss(entryMargin: number): number {
+    return entryMargin * 0.01; // 1% stop loss
+  }
+}
 ```
 
-### Remote Data Configuration
-Add remote SSH server credentials in `.env` to stream option chain tick datasets on the fly without storing files locally or overloading server RAM (< 50MB peak memory):
-```env
-DATA_SSH_HOST=your_ssh_host
-DATA_SSH_USER=ubuntu
-DATA_SSH_PORT=22
-DATA_SSH_KEY=~/.ssh/id_rsa
-DATA_REMOTE_PATH=/data/nifty-optionchain
-KEY_PASSPHRASE=your_key_passphrase
+### Step 2: Register in `src/strategy/index.ts`
+```typescript
+import { MyStrategy } from './MyStrategy.js';
+
+registerStrategy(new MyStrategy());
 ```
+
+### Step 3: Run Strategy
+Set `STRATEGY=my-strategy` in your `.env`.
 
 ---
 
 ## Commands
 
-Control and inspect the strategy via Telegram Bot commands:
-* `/status` — Displays current position detail, margin, SL level, live LTPs, and net trade P&L.
-* `/paper [on|off]` — Toggles paper trading mode.
-* `/kill [on|off]` — Toggles emergency kill switch (blocks new strategy entries; open positions/monitoring are unaffected).
-* `/panic [on|off]` — Toggles emergency panic halt switch (blocks all entries, exits, and active position monitoring).
-* `/update` — Forces manual download and cache update of the option scrip master list.
-* `/logs` — Returns the last 20 lines of the daily log.
+| Command | Purpose |
+|---|---|
+| `pnpm dev` | Run daemon in local development with `tsx` |
+| `pnpm build` | Compile TypeScript to `dist/` |
+| `pnpm start` | Run compiled daemon with Node |
+| `pnpm test` | Run all Jest unit and integration tests |
+| `pnpm verify` | Run full pre-commit pipeline (typecheck, lint, format check, tests, build) |
+| `pnpm lint` | Run ESLint across TypeScript source files |
+| `pnpm format` | Auto-format files with Prettier |
 
 ---
 
-## Testing & CI/CD
+## Template Workflow & Maintenance
 
-Run format, lint, and test validation checks locally:
-```bash
-pnpm verify
-```
-
-Note: To support modern package managers like `pnpm` v11 and prevent deprecation warnings, all package lifecycle and script permissions are configured in `pnpm-workspace.yaml` instead of the legacy `pnpm` field in `package.json`.
-
-
-The repository is configured with GitHub Actions:
-- **CI**: Triggers on PR/push to verify type safety, styling, lint rules, test coverage, PR description, and README accuracy.
-- **Deploy**: Runs automatically after a successful CI pass on `master` branch to deploy the built strategy onto Oracle Cloud.
-
-## Known SmartAPI Fixes
-
-The following endpoint patches are applied in `src/helpers/`:
-
-| Issue | Fix | Files |
-|-------|-----|-------|
-| `getLastPointPrice` returns HTML rejection | Use `/market/v1/quote` endpoint instead | `marketData.ts` |
-| WebSocket URL `smartapisec.angelone.in` has no DNS | Use `smartapisocket.angelone.in/smart-stream` | `websocket.ts` |
-| WS auth: `Bearer` prefix rejected | Send raw JWT token in `Authorization` header | `websocket.ts` |
-| WS SSL cert validation | Set `rejectUnauthorized: false` | `websocket.ts` |
-| Margin API returns 400 `"Order type is required"` | Add `orderType: 'MARKET'` to each margin leg; read `totalMarginRequired` from response | `orders.ts`, `entryJob.ts` |
-| WebSocket binary parser offset | Read token from bytes 2–27, LTP from byte 43 as an 8-byte signed long | `websocket.ts` |
-| Duplicate orders on retry | Exclude placeOptionOrder from generic retry, use exponential backoff for other requests | `api.ts`, `orders.ts` |
-| OS Timezone dependency | Construct UTC Date re-anchored to India timezone to calculate expiry days | `holidayCheck.ts`, `ecosystem.config.cjs` |
-| Stale position storage | Reset legs, entryMargin, and stopLoss fields to empty/zero upon clearing | `positionStore.ts` |
-| Hardcoded request headers | Dynamic resolution of local IP, MAC address, and public IP on startup | `api.ts` |
-| Option strike unit | Normalise strikes with a fixed divisor of 100 per API conventions | `marketData.ts` |
-
-## Post-Expiry Analysis
-
-On each expiry day (Tuesdays for Nifty, Thursdays for Sensex), the strategy runs an automated analysis pipeline:
-
-1. **Snapshot Collector** — every 15 min (9:15 AM–3:30 PM IST) captures P&L snapshots to `analysis/snapshots/` dynamically detecting active positions across Nifty and Sensex.
-2. **Post-Close Report** — at 3:40 PM IST, generates a markdown report in `analysis/reports/` named as `expiry-[symbol]-[date].md` and opens a PR.
-3. **Per-Minute MTM Logger** — appends current mark-to-market P&L to `logs/mtm/mtm-[symbol]-[date].log` every minute (Monday–Friday) for active NIFTY and SENSEX positions, allowing external tools to track performance using the WebSocket stream without extra API calls.
-
-Reports include: entry/exit spot prices, leg-wise P&L, P&L timeline, and return metrics.
-
-## Development Rules
-
-- **No pushes to `master` during market hours** (9:15 AM – 3:30 PM IST) — triggers the deploy pipeline which resets PM2
-- **Always use branches + PRs** — never push directly to `master`
-- **Run `pnpm verify` before every push** — runs typecheck, lint, prettier, tests, and build
-- **Update `README.md`** when changing core application files (checked by CI)
+Refer to [docs/using-this-template.md](docs/using-this-template.md) for instructions on creating new strategy repositories from this template and pulling subsequent core engine updates.

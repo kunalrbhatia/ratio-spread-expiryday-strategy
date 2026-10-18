@@ -1,171 +1,44 @@
-import {
-  getSpotLtp,
-  getATMStrike,
-  findATMContracts,
-  findClosestPremiumStrike,
-  getOptionLtps,
-} from '../helpers/marketData.js';
-import { placeOptionOrder, fetchUtilizedMargin, MarginLeg } from '../helpers/orders.js';
+import { fetchUtilizedMargin, MarginLeg } from '../helpers/orders.js';
 import { positionStores, OptionLeg } from '../store/positionStore.js';
 import { sendAlert } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
-import { INDEX_CONFIGS } from '../helpers/constants.js';
-import { isKillSwitchActive, isPanicSwitchActive } from '../helpers/modeManager.js';
+import { INDEX_CONFIGS, SupportedIndex } from '../helpers/constants.js';
+import { isKillSwitchActive, isPanicSwitchActive, isPaperMode } from '../helpers/modeManager.js';
+import { getActiveStrategy } from '../strategy/index.js';
 
-export const executeExpiryStrategyEntry = async (
-  symbol: 'NIFTY' | 'SENSEX' = 'NIFTY',
-): Promise<boolean> => {
+export const executeStrategyEntry = async (symbol: string): Promise<boolean> => {
   if (isKillSwitchActive() || isPanicSwitchActive()) {
     logger.warn(`Strategy entry blocked for ${symbol}: Kill Switch or Panic Switch is active.`);
     return false;
   }
 
+  const strategy = getActiveStrategy();
+  const paper = isPaperMode();
+
   try {
-    logger.info(`--- Starting ${symbol} Expiry Strategy Entry Job (09:20 AM) ---`);
+    logger.info(
+      `--- Starting Strategy Entry: [${strategy.name}] on ${symbol} (Paper: ${paper}) ---`,
+    );
 
-    const config = INDEX_CONFIGS[symbol];
-
-    // 1. Get spot and calculate ATM
-    const spot = await getSpotLtp(symbol);
-    const atmStrike = getATMStrike(spot, config.strikeStep);
-    logger.info(`${symbol} Calculated ATM Strike: ${atmStrike}`);
-
-    // 2. Find CE and PE ATM options
-    const { ce: atmCE, pe: atmPE } = findATMContracts(symbol, atmStrike);
-    logger.info(`${symbol} ATM Call Contract: ${atmCE.symbol} (${atmCE.token})`);
-    logger.info(`${symbol} ATM Put Contract: ${atmPE.symbol} (${atmPE.token})`);
-
-    // 3. Buy 1 lot ATM CE and PE
-    const buyQty = config.lotSize;
-
-    logger.info(`Placing market orders to buy ${symbol} ATM Call and ATM Put...`);
-    const ceBuyOrderId = await placeOptionOrder({
-      tradingsymbol: atmCE.symbol,
-      symboltoken: atmCE.token,
-      transactiontype: 'BUY',
-      quantity: buyQty,
-      exchange: config.optionExchange,
+    // Delegate trade creation to the active Strategy
+    const legs: OptionLeg[] | null = await strategy.entry({
+      symbol,
+      isPaper: paper,
     });
-    logger.info(`${symbol} ATM CE Order ID: ${ceBuyOrderId}`);
 
-    const peBuyOrderId = await placeOptionOrder({
-      tradingsymbol: atmPE.symbol,
-      symboltoken: atmPE.token,
-      transactiontype: 'BUY',
-      quantity: buyQty,
-      exchange: config.optionExchange,
-    });
-    logger.info(`${symbol} ATM PE Order ID: ${peBuyOrderId}`);
-
-    // 4. Retrieve execute prices with retries
-    let fillPrices = new Map<string, number>();
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        fillPrices = await getOptionLtps([atmCE.token, atmPE.token], symbol);
-        if (fillPrices.get(atmCE.token) && fillPrices.get(atmPE.token)) {
-          break;
-        }
-      } catch (err: any) {
-        logger.warn(`Attempt ${attempt} to retrieve option LTPs failed: ${err.message}`);
-      }
-      if (attempt < 3) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    }
-
-    const pCEBuy = fillPrices.get(atmCE.token);
-    const pPEBuy = fillPrices.get(atmPE.token);
-
-    if (!pCEBuy || !pPEBuy) {
-      throw new Error(
-        `Failed to retrieve valid LTPs for ATM CE (${atmCE.token}) or PE (${atmPE.token}) after retries. Aborting entry.`,
+    if (!legs || legs.length === 0) {
+      logger.info(
+        `Strategy '${strategy.name}' produced no entry legs for ${symbol}. Entry skipped.`,
       );
+      return false;
     }
 
-    logger.info(`${symbol} ATM CE Entry Premium: ₹${pCEBuy}`);
-    logger.info(`${symbol} ATM PE Entry Premium: ₹${pPEBuy}`);
+    const config = INDEX_CONFIGS[symbol as SupportedIndex];
+    const optionExchange = config ? config.optionExchange : 'NFO';
 
-    // 5. Calculate targets
-    const targetCESell = pCEBuy / 3;
-    const targetPESell = pPEBuy / 3;
-    logger.info(`${symbol} Target CE Sell Premium: ₹${targetCESell.toFixed(2)}`);
-    logger.info(`${symbol} Target PE Sell Premium: ₹${targetPESell.toFixed(2)}`);
-
-    // 6. Find closest strikes to targets
-    const { contract: sellCE, premium: pCESell } = await findClosestPremiumStrike(
-      symbol,
-      'CE',
-      targetCESell,
-    );
-    const { contract: sellPE, premium: pPESell } = await findClosestPremiumStrike(
-      symbol,
-      'PE',
-      targetPESell,
-    );
-
-    logger.info(`${symbol} Selected hedge CE to sell: ${sellCE.symbol} at premium ₹${pCESell}`);
-    logger.info(`${symbol} Selected hedge PE to sell: ${sellPE.symbol} at premium ₹${pPESell}`);
-
-    // 7. Sell 3 lots of target CE and target PE
-    const sellQty = config.lotSize * 3;
-
-    logger.info(`Placing market orders to sell ${symbol} hedge Call and Put positions...`);
-    const ceSellOrderId = await placeOptionOrder({
-      tradingsymbol: sellCE.symbol,
-      symboltoken: sellCE.token,
-      transactiontype: 'SELL',
-      quantity: sellQty,
-      exchange: config.optionExchange,
-    });
-    logger.info(`${symbol} Hedge CE Order ID: ${ceSellOrderId}`);
-
-    const peSellOrderId = await placeOptionOrder({
-      tradingsymbol: sellPE.symbol,
-      symboltoken: sellPE.token,
-      transactiontype: 'SELL',
-      quantity: sellQty,
-      exchange: config.optionExchange,
-    });
-    logger.info(`${symbol} Hedge PE Order ID: ${peSellOrderId}`);
-
-    // 8. Construct positions state and fetch utilized margin
-    const activeLegs: OptionLeg[] = [
-      {
-        symbol: atmCE.symbol,
-        token: atmCE.token,
-        entryPremium: pCEBuy,
-        qty: buyQty,
-        type: 'CE',
-        direction: 'BUY',
-      },
-      {
-        symbol: atmPE.symbol,
-        token: atmPE.token,
-        entryPremium: pPEBuy,
-        qty: buyQty,
-        type: 'PE',
-        direction: 'BUY',
-      },
-      {
-        symbol: sellCE.symbol,
-        token: sellCE.token,
-        entryPremium: pCESell,
-        qty: sellQty,
-        type: 'CE',
-        direction: 'SELL',
-      },
-      {
-        symbol: sellPE.symbol,
-        token: sellPE.token,
-        entryPremium: pPESell,
-        qty: sellQty,
-        type: 'PE',
-        direction: 'SELL',
-      },
-    ];
-
-    const marginLegs: MarginLeg[] = activeLegs.map((leg) => ({
-      exchange: config.optionExchange,
+    // Construct margin legs to determine required margin
+    const marginLegs: MarginLeg[] = legs.map((leg) => ({
+      exchange: optionExchange,
       qty: leg.qty,
       price: leg.entryPremium,
       productType: 'CARRYFORWARD',
@@ -175,37 +48,36 @@ export const executeExpiryStrategyEntry = async (
     }));
 
     const totalMargin = await fetchUtilizedMargin(marginLegs);
+    const stopLossAmount = strategy.computeStopLoss(totalMargin);
 
     const store = positionStores[symbol];
-    // Save to store (which automatically sets 1% SL)
-    store.setPositions(activeLegs, totalMargin);
+    store.setPositions(legs, totalMargin, stopLossAmount);
 
-    const positions = store.getPositions();
-    const slAmount = positions.stopLoss;
+    const legsSummary = legs
+      .map((l) => `• ${l.direction} ${l.qty} qty ${l.symbol} @ ₹${l.entryPremium}`)
+      .join('\n');
 
     const alertMessage = `
-🟢 <b>${symbol} Strategy Entry Complete</b>
+🟢 <b>Strategy Entry Complete: ${strategy.name.toUpperCase()}</b>
 ---------------------------------
-<b>${symbol} Spot:</b> ${spot}
-<b>ATM Strike:</b> ${atmStrike}
+<b>Instrument:</b> ${symbol}
+<b>Mode:</b> ${paper ? '🧪 PAPER' : '⚡ LIVE'}
 ---------------------------------
-<b>Long Positions (1 Lot):</b>
-• CE: ${atmCE.symbol} @ ₹${pCEBuy}
-• PE: ${atmPE.symbol} @ ₹${pPEBuy}
-
-<b>Short Positions (3 Lots):</b>
-• CE: ${sellCE.symbol} @ ₹${pCESell}
-• PE: ${sellPE.symbol} @ ₹${pPESell}
+<b>Positions:</b>
+${legsSummary}
 ---------------------------------
 <b>Utilized Margin:</b> ₹${totalMargin.toLocaleString()}
-<b>Stop Loss (1%):</b> ₹${slAmount.toLocaleString()}
+<b>Stop Loss:</b> ₹${stopLossAmount.toLocaleString()}
 `;
 
     await sendAlert(alertMessage);
     return true;
   } catch (error: any) {
-    logger.error(`${symbol} Strategy entry execution failed: ${error.message}`);
-    await sendAlert(`🚨 <b>${symbol} Strategy Entry Failed!</b>\nError: ${error.message}`);
+    logger.error(`Strategy entry execution failed for ${symbol}: ${error.message}`);
+    await sendAlert(`🚨 <b>Strategy Entry Failed for ${symbol}!</b>\nError: ${error.message}`);
     return false;
   }
 };
+
+// Backwards compatibility alias
+export const executeExpiryStrategyEntry = executeStrategyEntry;

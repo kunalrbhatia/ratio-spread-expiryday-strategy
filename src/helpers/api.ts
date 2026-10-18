@@ -8,9 +8,9 @@ let lastRequestTime = 0;
 const MIN_GAP_MS = 1000;
 let queueChain: Promise<any> = Promise.resolve();
 
-let cachedPublicIp = '106.193.147.98'; // fallback
-let cachedLocalIp = '192.168.1.1'; // fallback
-let cachedMacAddress = 'fe80::216:3eff:fe0f:1105'; // fallback
+let cachedPublicIp = '127.0.0.1'; // fallback
+let cachedLocalIp = '127.0.0.1'; // fallback
+let cachedMacAddress = '02:00:00:00:00:00'; // fallback
 let ipFetched = false;
 
 // Populate local network interface info immediately on startup

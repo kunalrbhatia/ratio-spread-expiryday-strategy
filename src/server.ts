@@ -3,21 +3,30 @@ import { env } from './config/env.js';
 import { logger } from './helpers/logger.js';
 import { positionStores } from './store/positionStore.js';
 import { isPaperMode } from './helpers/modeManager.js';
+import { getActiveStrategy } from './strategy/index.js';
 import { Server } from 'http';
 
 const app = express();
 
 app.get('/health', (req, res) => {
-  const niftyPositions = positionStores.NIFTY.getPositions();
-  const sensexPositions = positionStores.SENSEX.getPositions();
+  const strategy = getActiveStrategy();
+  const instruments = strategy.instruments || ['NIFTY'];
+
+  const activeTrades: Record<string, boolean> = {};
+  let anyActive = false;
+
+  for (const sym of instruments) {
+    const active = positionStores[sym].getPositions().active;
+    activeTrades[sym] = active;
+    if (active) anyActive = true;
+  }
+
   res.json({
     status: 'UP',
+    strategy: strategy.name,
     mode: isPaperMode() ? 'PAPER' : 'LIVE',
-    activeTrade: niftyPositions.active || sensexPositions.active,
-    activeTrades: {
-      NIFTY: niftyPositions.active,
-      SENSEX: sensexPositions.active,
-    },
+    activeTrade: anyActive,
+    activeTrades,
     timestamp: new Date().toISOString(),
   });
 });

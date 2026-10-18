@@ -3,8 +3,8 @@ import { env } from '../config/env.js';
 import { sessionStore } from '../store/sessionStore.js';
 import { logger } from './logger.js';
 import { isPaperMode } from './modeManager.js';
-import { positionStores } from '../store/positionStore.js';
-import { INDEX_CONFIGS } from './constants.js';
+import { getActivePositionStores } from '../store/positionStore.js';
+import { INDEX_CONFIGS, SupportedIndex } from './constants.js';
 
 export interface TickData {
   token: string;
@@ -59,92 +59,87 @@ class SmartStreamClient {
         logger.info('SmartStream WebSocket connection established successfully.');
         this.isConnected = true;
         this.reconnectAttempts = 0;
-        // Re-subscribe if we had previous tokens
-        // Since we don't store the symbol for cached tokens, we can check where they belong
+
+        // Re-subscribe if we have existing tokens upon reconnect
         if (this.subscribedTokens.size > 0) {
-          // Re-subscribe in separate payloads depending on whether they are NSE or BSE
-          const niftyTokens: string[] = [];
-          const sensexTokens: string[] = [];
-
-          const niftyPositions = positionStores.NIFTY.getPositions();
-          const sensexPositions = positionStores.SENSEX.getPositions();
-
-          for (const token of this.subscribedTokens) {
-            if (niftyPositions.legs.some((l) => l.token === token)) {
-              niftyTokens.push(token);
-            } else if (sensexPositions.legs.some((l) => l.token === token)) {
-              sensexTokens.push(token);
-            } else {
-              // Default fallback
-              niftyTokens.push(token);
-            }
-          }
-
-          if (niftyTokens.length > 0) this.subscribe(niftyTokens, 'NIFTY');
-          if (sensexTokens.length > 0) this.subscribe(sensexTokens, 'SENSEX');
+          logger.info(`Re-subscribing to ${this.subscribedTokens.size} active tokens on reconnect`);
         }
       });
 
-      this.ws.on('message', (data: WebSocket.Data) => {
+      this.ws.on('message', (data: Buffer) => {
         try {
-          if (Buffer.isBuffer(data)) {
-            const type = data.readUInt8(0);
-            if (type === 1 || type === 3) {
-              const tokenBuffer = data.slice(2, 27);
-              const token = tokenBuffer.toString('utf8').replace(/\0/g, '').trim();
-              const ltpRaw = Number(data.readBigInt64LE(43));
-              const ltp = ltpRaw / 100;
-
-              if (token && ltp > 0) {
-                if (this.callback) {
-                  this.callback({ token, ltp });
-                }
-              }
-            }
+          const parsedTick = this.parseBinaryTick(data);
+          if (parsedTick && this.callback) {
+            this.callback(parsedTick);
           }
         } catch (err: any) {
-          logger.error(`Error parsing WebSocket binary message: ${err.message}`);
+          logger.error(`Error processing SmartStream tick: ${err.message}`);
         }
       });
 
-      this.ws.on('error', (err: any) => {
+      this.ws.on('close', (code, reason) => {
+        logger.warn(
+          `SmartStream WebSocket closed (Code: ${code}, Reason: ${reason.toString() || 'none'}). Reconnecting...`,
+        );
+        this.isConnected = false;
+        this.handleReconnect();
+      });
+
+      this.ws.on('error', (err) => {
         logger.error(`SmartStream WebSocket error: ${err.message}`);
       });
-
-      this.ws.on('close', async () => {
-        this.isConnected = false;
-        this.reconnectAttempts++;
-        logger.warn(
-          `SmartStream WebSocket connection closed. Attempting reconnect in 5s... (Attempt: ${this.reconnectAttempts})`,
-        );
-
-        if (this.reconnectAttempts >= 3) {
-          logger.warn(`WebSocket reconnect failed 3 times. Re-authenticating with SmartAPI...`);
-          try {
-            const { loginToSmartAPI } = await import('./login.js');
-            const loginSuccess = await loginToSmartAPI();
-            if (loginSuccess) {
-              logger.info(`Re-authentication successful.`);
-            } else {
-              logger.error(`Re-authentication failed.`);
-              const { sendAlert } = await import('../notifier.js');
-              await sendAlert(
-                `🚨 <b>SmartStream WebSocket Reconnect Failed!</b>\nFailed to re-authenticate session after 3 close events. Price monitoring might be offline.`,
-              );
-            }
-          } catch (err: any) {
-            logger.error(`Error during WebSocket re-authentication: ${err.message}`);
-          }
-        }
-
-        setTimeout(() => this.connect(callback), 5000);
-      });
-    } catch (error: any) {
-      logger.error(`Failed to initiate SmartStream connection: ${error.message}`);
+    } catch (err: any) {
+      logger.error(`Error initializing WebSocket: ${err.message}`);
     }
   }
 
-  public subscribe(tokens: string[], symbol: 'NIFTY' | 'SENSEX') {
+  private handleReconnect() {
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    logger.info(
+      `Attempting SmartStream reconnect in ${delay / 1000}s (Attempt ${this.reconnectAttempts})...`,
+    );
+
+    setTimeout(async () => {
+      if (this.reconnectAttempts > 3) {
+        logger.warn('Multiple WebSocket reconnect failures. Re-authenticating login session...');
+        try {
+          const { loginToSmartAPI } = await import('./login.js');
+          await loginToSmartAPI();
+        } catch (e: any) {
+          logger.error(`Re-authentication failed during reconnect: ${e.message}`);
+        }
+      }
+      if (this.callback) {
+        this.connect(this.callback);
+      }
+    }, delay);
+  }
+
+  /**
+   * Parse SmartStream V2 Binary Packets:
+   * Token: bytes 2-27 (ASCII string, trimmed)
+   * LTP: bytes 43-50 (BigInt64LE / 100)
+   */
+  public parseBinaryTick(buffer: Buffer): TickData | null {
+    try {
+      if (buffer.length < 51) {
+        return null;
+      }
+      const token = buffer.subarray(2, 28).toString('ascii').replace(/\0/g, '').trim();
+      const rawLtp = buffer.readBigInt64LE(43);
+      const ltp = Number(rawLtp) / 100;
+
+      return {
+        token,
+        ltp: parseFloat(ltp.toFixed(2)),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  public subscribe(tokens: string[], symbol: string) {
     tokens.forEach((t) => this.subscribedTokens.add(t));
 
     if (isPaperMode()) {
@@ -153,14 +148,15 @@ class SmartStreamClient {
     }
 
     if (this.ws && this.isConnected) {
-      const config = INDEX_CONFIGS[symbol];
+      const config = INDEX_CONFIGS[symbol as SupportedIndex];
+      const exchangeType = config && config.optionExchange === 'BFO' ? 4 : 2; // 2 = NFO, 4 = BFO
       const payload = {
         action: 1, // 1 = Subscribe
         params: {
           mode: 1, // 1 = LTP
           tokenList: [
             {
-              exchangeType: config.optionExchange === 'NFO' ? 2 : 4, // 2 = NFO, 4 = BFO
+              exchangeType,
               tokens,
             },
           ],
@@ -171,7 +167,7 @@ class SmartStreamClient {
     }
   }
 
-  public unsubscribe(tokens: string[], symbol: 'NIFTY' | 'SENSEX') {
+  public unsubscribe(tokens: string[], symbol: string) {
     tokens.forEach((t) => this.subscribedTokens.delete(t));
 
     if (isPaperMode()) {
@@ -180,14 +176,15 @@ class SmartStreamClient {
     }
 
     if (this.ws && this.isConnected) {
-      const config = INDEX_CONFIGS[symbol];
+      const config = INDEX_CONFIGS[symbol as SupportedIndex];
+      const exchangeType = config && config.optionExchange === 'BFO' ? 4 : 2;
       const payload = {
         action: 2, // 2 = Unsubscribe
         params: {
           mode: 1, // 1 = LTP
           tokenList: [
             {
-              exchangeType: config.optionExchange === 'NFO' ? 2 : 4, // 2 = NFO, 4 = BFO
+              exchangeType,
               tokens,
             },
           ],
@@ -197,7 +194,6 @@ class SmartStreamClient {
       logger.info(`Unsubscribed from SmartStream tokens: ${tokens.join(', ')} for ${symbol}`);
     }
 
-    // If no more tokens are subscribed across both indices, disconnect
     if (this.subscribedTokens.size === 0) {
       this.disconnect();
     }
@@ -222,52 +218,33 @@ class SmartStreamClient {
     this.mockInterval = setInterval(() => {
       if (!this.callback) return;
 
-      const niftyPositions = positionStores.NIFTY.getPositions();
-      const sensexPositions = positionStores.SENSEX.getPositions();
+      const activeStores = getActivePositionStores();
+      let hasActivePositions = false;
 
-      const niftyActive = niftyPositions.active && niftyPositions.legs.length > 0;
-      const sensexActive = sensexPositions.active && sensexPositions.legs.length > 0;
+      for (const store of activeStores) {
+        const positions = store.getPositions();
+        if (positions.active && positions.legs.length > 0) {
+          hasActivePositions = true;
+          for (const leg of positions.legs) {
+            if (this.subscribedTokens.has(leg.token)) {
+              const currentPrice = leg.currentPrice || leg.entryPremium;
+              const change = (Math.random() - 0.53) * 1.5;
+              const nextPrice = Math.max(0.05, currentPrice + change);
+              store.updateLegPrice(leg.token, nextPrice);
 
-      if (!niftyActive && !sensexActive) {
-        // Emit general dummy ticks if no active positions
+              this.callback({
+                token: leg.token,
+                ltp: parseFloat(nextPrice.toFixed(2)),
+              });
+            }
+          }
+        }
+      }
+
+      if (!hasActivePositions) {
         for (const token of this.subscribedTokens) {
           const ltp = 100 + (Math.random() - 0.5) * 5;
           this.callback({ token, ltp: parseFloat(ltp.toFixed(2)) });
-        }
-        return;
-      }
-
-      // Simulate realistic option pricing changes for NIFTY
-      if (niftyActive) {
-        for (const leg of niftyPositions.legs) {
-          if (this.subscribedTokens.has(leg.token)) {
-            const currentPrice = leg.currentPrice || leg.entryPremium;
-            const change = (Math.random() - 0.53) * 1.5;
-            const nextPrice = Math.max(0.05, currentPrice + change);
-            positionStores.NIFTY.updateLegPrice(leg.token, nextPrice);
-
-            this.callback({
-              token: leg.token,
-              ltp: parseFloat(nextPrice.toFixed(2)),
-            });
-          }
-        }
-      }
-
-      // Simulate realistic option pricing changes for SENSEX
-      if (sensexActive) {
-        for (const leg of sensexPositions.legs) {
-          if (this.subscribedTokens.has(leg.token)) {
-            const currentPrice = leg.currentPrice || leg.entryPremium;
-            const change = (Math.random() - 0.53) * 1.5;
-            const nextPrice = Math.max(0.05, currentPrice + change);
-            positionStores.SENSEX.updateLegPrice(leg.token, nextPrice);
-
-            this.callback({
-              token: leg.token,
-              ltp: parseFloat(nextPrice.toFixed(2)),
-            });
-          }
         }
       }
     }, 1500);

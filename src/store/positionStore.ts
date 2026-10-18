@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../helpers/logger.js';
+import { env } from '../config/env.js';
 
 export interface OptionLeg {
   symbol: string;
@@ -16,7 +17,7 @@ export interface PositionState {
   active: boolean;
   legs: OptionLeg[];
   entryMargin: number;
-  stopLoss: number; // 1% of entryMargin
+  stopLoss: number;
 }
 
 class PositionStore {
@@ -28,7 +29,7 @@ class PositionStore {
     stopLoss: 0,
   };
 
-  constructor(private symbol: 'NIFTY' | 'SENSEX') {
+  constructor(private symbol: string) {
     this.filePath = path.join(process.cwd(), 'data', `${symbol.toLowerCase()}_positions.json`);
     this.load();
   }
@@ -66,12 +67,13 @@ class PositionStore {
     return { ...this.state };
   }
 
-  public setPositions(legs: OptionLeg[], entryMargin: number) {
+  public setPositions(legs: OptionLeg[], entryMargin: number, customStopLoss?: number) {
+    const defaultSl = entryMargin * (env.STOP_LOSS_PERCENT / 100);
     this.state = {
       active: true,
       legs,
       entryMargin,
-      stopLoss: entryMargin * 0.01,
+      stopLoss: customStopLoss !== undefined ? customStopLoss : defaultSl,
     };
     this.save();
   }
@@ -103,10 +105,26 @@ class PositionStore {
   }
 }
 
-export const positionStores: Record<'NIFTY' | 'SENSEX', PositionStore> = {
-  NIFTY: new PositionStore('NIFTY'),
-  SENSEX: new PositionStore('SENSEX'),
+const storeMap = new Map<string, PositionStore>();
+
+export const getPositionStore = (symbol: string): PositionStore => {
+  const upper = symbol.toUpperCase();
+  if (!storeMap.has(upper)) {
+    storeMap.set(upper, new PositionStore(upper));
+  }
+  return storeMap.get(upper)!;
 };
 
-export const positionStore = positionStores.NIFTY;
+export const getActivePositionStores = (): PositionStore[] => {
+  return Array.from(storeMap.values());
+};
+
+export const positionStores: Record<string, PositionStore> = new Proxy(
+  {},
+  {
+    get: (_, prop: string) => getPositionStore(prop),
+  },
+);
+
+export const positionStore = getPositionStore('NIFTY');
 export { PositionStore };

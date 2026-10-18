@@ -1,12 +1,13 @@
 import { apiRequest } from './api.js';
-import { CONSTANTS } from './constants.js';
+import { CONSTANTS, INDEX_CONFIGS, SupportedIndex } from './constants.js';
 import { getCachedScrips, ScripItem } from './scripMaster.js';
 import { logger } from './logger.js';
 
-import { INDEX_CONFIGS } from './constants.js';
-
-export const getSpotLtp = async (symbol: 'NIFTY' | 'SENSEX'): Promise<number> => {
-  const config = INDEX_CONFIGS[symbol];
+export const getSpotLtp = async (symbol: SupportedIndex | string): Promise<number> => {
+  const config = INDEX_CONFIGS[symbol as SupportedIndex];
+  if (!config) {
+    throw new Error(`Unsupported index symbol: ${symbol}`);
+  }
   try {
     const response = await apiRequest({
       method: 'POST',
@@ -40,12 +41,12 @@ export const getNiftySpotLtp = async (): Promise<number> => {
   return getSpotLtp('NIFTY');
 };
 
-export const getATMStrike = (spot: number, strikeStep: number = 50): number => {
+export const getATMStrike = (spot: number, strikeStep = 50): number => {
   return Math.round(spot / strikeStep) * strikeStep;
 };
 
 export const findATMContracts = (
-  symbol: 'NIFTY' | 'SENSEX',
+  symbol: SupportedIndex | string,
   atmStrike: number,
 ): { ce: ScripItem; pe: ScripItem } => {
   const scrips = getCachedScrips(symbol);
@@ -55,8 +56,7 @@ export const findATMContracts = (
 
   for (const item of scrips) {
     // Normalise strike representation in SmartAPI headers.
-    // According to Angel One API conventions, OPTIDX strikes in both NFO and BFO segments
-    // are represented in paise (multiplied by 100), requiring a fixed divisor of 100.
+    // OPTIDX strikes in both NFO and BFO segments are represented in paise (multiplied by 100).
     const itemStrike = parseFloat(item.strike) / 100;
     if (Math.round(itemStrike) === atmStrike) {
       if (item.symbol.endsWith('CE')) {
@@ -78,9 +78,11 @@ export const findATMContracts = (
 
 export const getOptionLtps = async (
   tokens: string[],
-  symbol: 'NIFTY' | 'SENSEX' = 'NIFTY',
+  symbol: SupportedIndex | string = 'NIFTY',
 ): Promise<Map<string, number>> => {
-  const config = INDEX_CONFIGS[symbol];
+  const config = INDEX_CONFIGS[symbol as SupportedIndex];
+  const optionExchange = config ? config.optionExchange : 'NFO';
+
   try {
     const response = await apiRequest({
       method: 'POST',
@@ -88,7 +90,7 @@ export const getOptionLtps = async (
       data: {
         mode: 'LTP',
         exchangeTokens: {
-          [config.optionExchange]: tokens,
+          [optionExchange]: tokens,
         },
       },
     });
@@ -104,50 +106,4 @@ export const getOptionLtps = async (
     logger.error(`Error in getOptionLtps for ${symbol}: ${error.message}`);
     throw error;
   }
-};
-
-export const findClosestPremiumStrike = async (
-  symbol: 'NIFTY' | 'SENSEX',
-  type: 'CE' | 'PE',
-  targetPremium: number,
-): Promise<{ contract: ScripItem; premium: number }> => {
-  const scrips = getCachedScrips(symbol).filter((s) => s.symbol.endsWith(type));
-  if (scrips.length === 0) {
-    throw new Error(`No ${type} contracts found in scrip-master-${symbol.toLowerCase()}.json`);
-  }
-
-  // Fetch LTPs for all contracts in batches of 50 to avoid payload limits
-  const tokens = scrips.map((s) => s.token);
-  const ltpMap = new Map<string, number>();
-
-  const batchSize = 45; // safe margin
-  for (let i = 0; i < tokens.length; i += batchSize) {
-    const batch = tokens.slice(i, i + batchSize);
-    const batchLtps = await getOptionLtps(batch, symbol);
-    for (const [token, ltp] of batchLtps.entries()) {
-      ltpMap.set(token, ltp);
-    }
-  }
-
-  let closestContract: ScripItem | null = null;
-  let closestPremium = 0;
-  let minDiff = Infinity;
-
-  for (const item of scrips) {
-    const premium = ltpMap.get(item.token);
-    if (premium !== undefined && premium > 0) {
-      const diff = Math.abs(premium - targetPremium);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestContract = item;
-        closestPremium = premium;
-      }
-    }
-  }
-
-  if (!closestContract) {
-    throw new Error(`Could not find closest ${type} contract for target premium ${targetPremium}`);
-  }
-
-  return { contract: closestContract, premium: closestPremium };
 };

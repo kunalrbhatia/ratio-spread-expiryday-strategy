@@ -15,6 +15,7 @@ import { calculateCurrentPnL } from '../jobs/monitorJob.js';
 import { downloadAndCacheScripMaster } from '../helpers/scripMaster.js';
 import { logger } from '../helpers/logger.js';
 import { getOptionLtps } from '../helpers/marketData.js';
+import { getActiveStrategy } from '../strategy/index.js';
 
 export let telegramBot: Telegraf | null = null;
 
@@ -43,8 +44,9 @@ export const startTelegramBot = () => {
         const paper = isPaperMode();
         const killActive = isKillSwitchActive();
         const panicActive = isPanicSwitchActive();
+        const strategy = getActiveStrategy();
 
-        let msg = `ℹ️ <b>System Status</b>\n`;
+        let msg = `ℹ️ <b>System Status [${strategy.name.toUpperCase()}]</b>\n`;
         msg += `<b>Trading Mode:</b> ${paper ? '🧪 PAPER' : '⚡ LIVE'}\n`;
         if (killActive || panicActive) {
           msg += `<b>System Status:</b> ${panicActive ? '🚨 PANIC (HALTED)' : '⚠️ KILLED (No new entries)'}\n`;
@@ -53,16 +55,20 @@ export const startTelegramBot = () => {
         }
         msg += `---------------------------------\n`;
 
-        for (const symbol of ['NIFTY', 'SENSEX'] as const) {
+        for (const symbol of strategy.instruments) {
           const store = positionStores[symbol];
           const positions = store.getPositions();
 
           if (positions.active) {
             // Fetch fresh prices for status reporting
             const tokens = positions.legs.map((l) => l.token);
-            const freshPrices = await getOptionLtps(tokens, symbol);
+            let freshPrices = new Map<string, number>();
+            try {
+              freshPrices = await getOptionLtps(tokens, symbol);
+            } catch {
+              // fallback to cached prices
+            }
 
-            // Update positions array temporarily for calculation
             const updatedLegs = positions.legs.map((l) => ({
               ...l,
               currentPrice: freshPrices.get(l.token) ?? l.currentPrice ?? l.entryPremium,
@@ -72,7 +78,7 @@ export const startTelegramBot = () => {
 
             msg += `📈 <b>${symbol} Position Status:</b> ACTIVE\n`;
             msg += `<b>Entry Margin:</b> ₹${positions.entryMargin.toLocaleString()}\n`;
-            msg += `<b>Stop Loss (1%):</b> ₹${positions.stopLoss.toLocaleString()}\n`;
+            msg += `<b>Stop Loss:</b> ₹${positions.stopLoss.toLocaleString()}\n`;
             msg += `<b>Current P&L:</b> ₹${currentPnL.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n`;
 
             for (const leg of updatedLegs) {
@@ -118,7 +124,6 @@ export const startTelegramBot = () => {
           setKillSwitch(false);
         }
       } else {
-        // Toggle if no arguments are provided
         const active = isKillSwitchActive();
         setKillSwitch(!active);
       }
@@ -139,7 +144,6 @@ export const startTelegramBot = () => {
           setPanicSwitch(false);
         }
       } else {
-        // Toggle if no arguments are provided
         const active = isPanicSwitchActive();
         setPanicSwitch(!active);
       }
@@ -151,12 +155,16 @@ export const startTelegramBot = () => {
 
     // Command: /update
     telegramBot.command('update', async (ctx) => {
-      ctx.reply('Initiating options scrip master update for both indices...');
-      const successNifty = await downloadAndCacheScripMaster('NIFTY');
-      const successSensex = await downloadAndCacheScripMaster('SENSEX');
+      const strategy = getActiveStrategy();
       ctx.reply(
-        `NIFTY update: ${successNifty ? '✅ Success' : '❌ Failed'}\nSENSEX update: ${successSensex ? '✅ Success' : '❌ Failed'}`,
+        `Initiating scrip master update for strategy instruments: ${strategy.instruments.join(', ')}...`,
       );
+      const results: string[] = [];
+      for (const symbol of strategy.instruments) {
+        const success = await downloadAndCacheScripMaster(symbol);
+        results.push(`${symbol}: ${success ? '✅ Success' : '❌ Failed'}`);
+      }
+      ctx.reply(results.join('\n'));
     });
 
     // Command: /logs
@@ -174,7 +182,6 @@ export const startTelegramBot = () => {
           return ctx.reply('No log files found.');
         }
 
-        // Get latest log file
         files.sort();
         const latestFile = path.join(logsDir, files[files.length - 1]);
         const logContent = fs.readFileSync(latestFile, 'utf-8');

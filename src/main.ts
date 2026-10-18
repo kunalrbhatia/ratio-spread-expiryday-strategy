@@ -1,43 +1,56 @@
 import cron from 'node-cron';
-import path from 'path';
-import { execSync } from 'child_process';
 import { logger } from './helpers/logger.js';
-import { isExpiryDayForSymbol } from './helpers/holidayCheck.js';
 import { loginToSmartAPI } from './helpers/login.js';
 import { downloadAndCacheScripMaster } from './helpers/scripMaster.js';
-import { executeExpiryStrategyEntry } from './jobs/entryJob.js';
+import { executeStrategyEntry } from './jobs/entryJob.js';
 import { startContinuousMonitoring, exitAllPositions } from './jobs/monitorJob.js';
 import { positionStores } from './store/positionStore.js';
 import { startTelegramBot } from './telegram/bot.js';
 import { startExpressServer } from './server.js';
 import { isPaperMode } from './helpers/modeManager.js';
 import { startMtmLogging } from './jobs/mtmLogger.js';
+import { getActiveStrategy } from './strategy/index.js';
 
 const BOOTSTRAP_TIMEZONE = 'Asia/Kolkata';
 
+/**
+ * Parse "HH:mm" time string into cron minute and hour parts.
+ */
+const parseTimeToCron = (timeStr: string): { minute: string; hour: string } => {
+  const parts = timeStr.split(':');
+  if (parts.length >= 2) {
+    return { minute: parts[1], hour: parts[0] };
+  }
+  return { minute: '0', hour: '9' };
+};
+
 const bootstrap = async () => {
   try {
+    const strategy = getActiveStrategy();
+    const paper = isPaperMode();
+
     logger.info('==================================================');
-    logger.info('Starting RatioSpread Expiry Strategy Application...');
-    logger.info(`Mode: ${isPaperMode() ? '🧪 PAPER' : '⚡ LIVE'}`);
+    logger.info(`Starting Algo-Trading Skeleton [Strategy: ${strategy.name.toUpperCase()}]`);
+    logger.info(`Mode: ${paper ? '🧪 PAPER' : '⚡ LIVE'}`);
+    logger.info(`Instruments: ${strategy.instruments.join(', ')}`);
     logger.info('==================================================');
 
     // 1. Start Express health check & Telegram Bot listeners
     const server = startExpressServer();
     startTelegramBot();
 
-    // 2. Perform SmartAPI login if we are running in Live Mode
-    if (!isPaperMode()) {
+    // 2. Perform SmartAPI login if running in Live Mode
+    if (!paper) {
       const loginSuccess = await loginToSmartAPI();
       if (!loginSuccess) {
         logger.error(
-          'Failed to log in to SmartAPI on startup. Strategy will not run without session.',
+          'Failed to log in to SmartAPI on startup. System will not execute live orders without active session.',
         );
       }
     }
 
-    // 3. Recovery check: If there was a crash/restart and we have active positions, resume monitoring
-    for (const symbol of ['NIFTY', 'SENSEX'] as const) {
+    // 3. Crash recovery check: Resume monitoring for any active open positions
+    for (const symbol of strategy.instruments) {
       const positions = positionStores[symbol].getPositions();
       if (positions.active) {
         logger.warn(
@@ -47,155 +60,122 @@ const bootstrap = async () => {
       }
     }
 
-    // 4. Register Scheduled Crons (Asia/Kolkata Timezone)
+    // 4. Schedule Strategy Jobs dynamically from strategy.schedule
+    const { schedule } = strategy;
+    const weekdaysPattern = schedule.weekdays ? schedule.weekdays.join(',') : '1-5';
 
-    // Cron A: Scrip master download (08:30 AM, Monday - Friday)
+    // Cron A: Scrip master update
+    const scripTime = parseTimeToCron(schedule.scripMasterTime || '08:30');
+    const scripCronPattern = `${scripTime.minute} ${scripTime.hour} * * ${weekdaysPattern}`;
+    logger.info(
+      `Registering Scrip Master Cron: '${scripCronPattern}' (${schedule.scripMasterTime || '08:30'} IST)`,
+    );
     cron.schedule(
-      '30 8 * * 1-5',
+      scripCronPattern,
       async () => {
         logger.info('Cron triggered: Starting morning scrip master cache update...');
         const today = new Date();
-        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
-        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
 
-        if (isNiftyExpiry || isSensexExpiry) {
-          if (!isPaperMode()) {
-            const loginSuccess = await loginToSmartAPI();
-            if (!loginSuccess) return;
+        for (const symbol of strategy.instruments) {
+          const shouldRun = await strategy.shouldRunToday(symbol, today);
+          if (shouldRun) {
+            if (!isPaperMode()) {
+              const loginSuccess = await loginToSmartAPI();
+              if (!loginSuccess) continue;
+            }
+            if (strategy.onScripMasterUpdate) {
+              await strategy.onScripMasterUpdate(symbol);
+            } else {
+              await downloadAndCacheScripMaster(symbol);
+            }
+          } else {
+            logger.info(
+              `Today is not an active trading day for ${symbol}. Skipping scrip download.`,
+            );
           }
-          if (isNiftyExpiry) {
-            await downloadAndCacheScripMaster('NIFTY');
-          }
-          if (isSensexExpiry) {
-            await downloadAndCacheScripMaster('SENSEX');
-          }
-        } else {
-          logger.info(
-            'Today is not an expiry day for NIFTY or SENSEX. Skipping scrip master download.',
-          );
         }
       },
-      {
-        timezone: BOOTSTRAP_TIMEZONE,
-      },
+      { timezone: BOOTSTRAP_TIMEZONE },
     );
 
-    // Cron B: Expiry strategy entry (09:20 AM, Monday - Friday)
+    // Cron B: Strategy entry
+    const entryTime = parseTimeToCron(schedule.entryTime || '09:20');
+    const entryCronPattern = `${entryTime.minute} ${entryTime.hour} * * ${weekdaysPattern}`;
+    logger.info(
+      `Registering Strategy Entry Cron: '${entryCronPattern}' (${schedule.entryTime || '09:20'} IST)`,
+    );
     cron.schedule(
-      '20 9 * * 1-5',
+      entryCronPattern,
       async () => {
-        logger.info('Cron triggered: Checking for expiry strategy entry (09:20 AM)...');
+        logger.info(
+          `Cron triggered: Checking strategy entry (${schedule.entryTime || '09:20'} AM)...`,
+        );
         const today = new Date();
-        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
-        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
 
-        if (isNiftyExpiry || isSensexExpiry) {
-          if (!isPaperMode()) {
-            const loginSuccess = await loginToSmartAPI();
-            if (!loginSuccess) {
-              logger.error('Skipping strategy entry due to failed login.');
-              return;
+        for (const symbol of strategy.instruments) {
+          const shouldRun = await strategy.shouldRunToday(symbol, today);
+          if (shouldRun) {
+            if (!isPaperMode()) {
+              const loginSuccess = await loginToSmartAPI();
+              if (!loginSuccess) {
+                logger.error(`Skipping strategy entry for ${symbol} due to failed login.`);
+                continue;
+              }
             }
-          }
 
-          if (isNiftyExpiry) {
-            logger.info('Today is NIFTY expiry. Executing NIFTY strategy entry...');
-            const success = await executeExpiryStrategyEntry('NIFTY');
+            logger.info(`Executing strategy entry for ${symbol}...`);
+            const success = await executeStrategyEntry(symbol);
             if (success) {
-              logger.info('NIFTY Strategy entered successfully. Starting monitoring...');
-              startContinuousMonitoring('NIFTY');
+              logger.info(`${symbol} Strategy entered successfully. Starting monitoring...`);
+              startContinuousMonitoring(symbol);
             }
+          } else {
+            logger.info(`Today is not an execution day for ${symbol}. Skipping strategy entry.`);
           }
-
-          if (isSensexExpiry) {
-            logger.info('Today is SENSEX expiry. Executing SENSEX strategy entry...');
-            const success = await executeExpiryStrategyEntry('SENSEX');
-            if (success) {
-              logger.info('SENSEX Strategy entered successfully. Starting monitoring...');
-              startContinuousMonitoring('SENSEX');
-            }
-          }
-        } else {
-          logger.info('Today is not an expiry day for NIFTY or SENSEX. Skipping strategy entry.');
         }
       },
-      {
-        timezone: BOOTSTRAP_TIMEZONE,
-      },
+      { timezone: BOOTSTRAP_TIMEZONE },
     );
 
-    // Cron C: Expiry strategy exit / market close (03:27 PM, Monday - Friday)
+    // Cron C: Market close square-off
+    const exitTime = parseTimeToCron(schedule.exitTime || '15:27');
+    const exitCronPattern = `${exitTime.minute} ${exitTime.hour} * * ${weekdaysPattern}`;
+    logger.info(
+      `Registering Market Close Exit Cron: '${exitCronPattern}' (${schedule.exitTime || '15:27'} IST)`,
+    );
     cron.schedule(
-      '27 15 * * 1-5',
+      exitCronPattern,
       async () => {
-        logger.info('Cron triggered: Checking for market close square-off (03:27 PM)...');
+        logger.info(
+          `Cron triggered: Checking market close square-off (${schedule.exitTime || '15:27'} PM)...`,
+        );
         const today = new Date();
-        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
-        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
 
-        if (isNiftyExpiry || isSensexExpiry) {
-          if (!isPaperMode()) {
-            await loginToSmartAPI();
-          }
+        for (const symbol of strategy.instruments) {
+          const shouldRun = await strategy.shouldRunToday(symbol, today);
+          if (shouldRun) {
+            if (!isPaperMode()) {
+              await loginToSmartAPI();
+            }
 
-          if (isNiftyExpiry) {
-            const positions = positionStores.NIFTY.getPositions();
+            const positions = positionStores[symbol].getPositions();
             if (positions.active) {
-              await exitAllPositions('NIFTY', 'Market close square-off (03:27 PM)');
+              await exitAllPositions(
+                symbol,
+                `Market close square-off (${schedule.exitTime || '15:27'} PM)`,
+              );
             }
           }
-
-          if (isSensexExpiry) {
-            const positions = positionStores.SENSEX.getPositions();
-            if (positions.active) {
-              await exitAllPositions('SENSEX', 'Market close square-off (03:27 PM)');
-            }
-          }
-        } else {
-          logger.info(
-            'Today is not an expiry day for NIFTY or SENSEX. Skipping market close check.',
-          );
         }
       },
-      {
-        timezone: BOOTSTRAP_TIMEZONE,
-      },
+      { timezone: BOOTSTRAP_TIMEZONE },
     );
 
-    // Cron D: Post-expiry report generation (03:40 PM, Monday - Friday)
-    cron.schedule(
-      '40 15 * * 1-5',
-      async () => {
-        logger.info('Cron triggered: Checking for post-expiry report generation (03:40 PM)...');
-        const today = new Date();
-        const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
-        const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
-
-        if (isNiftyExpiry || isSensexExpiry) {
-          const symbol = isNiftyExpiry ? 'NIFTY' : 'SENSEX';
-          try {
-            const scriptPath = path.join(process.cwd(), 'analysis', 'generate-report.cjs');
-            execSync(`node "${scriptPath}" ${symbol}`, { stdio: 'inherit' });
-            logger.info(`Successfully generated post-expiry analysis report for ${symbol}`);
-          } catch (err: any) {
-            logger.error(`Failed to generate post-expiry report for ${symbol}: ${err.message}`);
-          }
-        } else {
-          logger.info(
-            'Today is not an expiry day for NIFTY or SENSEX. Skipping report generation.',
-          );
-        }
-      },
-      {
-        timezone: BOOTSTRAP_TIMEZONE,
-      },
-    );
-
-    // Cron E: Per-minute MTM logging (Every minute, Monday - Friday)
-    logger.info('Scheduling Cron E: Per-minute MTM logging...');
+    // Cron D: Per-minute MTM logging
+    logger.info('Scheduling Per-minute MTM logging...');
     startMtmLogging();
 
-    logger.info('All cron jobs scheduled successfully.');
+    logger.info('All strategy cron jobs scheduled successfully.');
 
     // Graceful Shutdown handling
     const shutdown = async () => {

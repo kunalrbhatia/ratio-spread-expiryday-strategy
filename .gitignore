@@ -30,7 +30,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Runtime data / state files
 .paper
 .kill
-data/
+.panic
+data/*
+!data/holidays.json
+!data/.gitkeep
 
 # IDE / Editor configuration
 .idea/
