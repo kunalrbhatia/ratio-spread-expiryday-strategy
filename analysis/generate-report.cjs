@@ -85,6 +85,20 @@ async function generateReport() {
 
   console.log(`📊 Generating post-expiry analysis for ${symbol} on ${expiryDate}`);
 
+  // --- Guard: never publish a report for a day we did not actually trade. ---
+  // logs/mtm/<symbol>-<date>.log is written only while a position is held, so its
+  // absence is proof that no trade was taken (kill switch active, entry blocked, or
+  // a non-expiry day). Without this check the generator builds a report from the
+  // shared broker position book and opens a PR for a trade that never happened.
+  const istDate = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const mtmFile = path.join(REPO_DIR, "logs", "mtm", `mtm-${symbol.toLowerCase()}-${istDate}.log`);
+  const tradedToday = fs.existsSync(mtmFile) && fs.readFileSync(mtmFile, "utf8").trim().length > 0;
+  if (!tradedToday) {
+    console.log(`SKIP: no position was held for ${symbol} on ${istDate} (no MTM series at ${mtmFile}).`);
+    console.log("      No report written, nothing committed, no PR opened.");
+    return;
+  }
+
   // 2. Load snapshot data
   const snapshotsDir = path.join(ANALYSIS_DIR, 'snapshots');
   const snapFile = path.join(snapshotsDir, `${isoDate}.jsonl`);
