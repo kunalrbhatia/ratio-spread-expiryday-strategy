@@ -126,9 +126,9 @@ const bootstrap = async () => {
 
     // Cron C: Expiry strategy exit / market close (03:27 PM, Monday - Friday)
     cron.schedule(
-      '27 15 * * 1-5',
+      '10 15 * * 1-5',
       async () => {
-        logger.info('Cron triggered: Checking for market close square-off (03:27 PM)...');
+        logger.info('Cron triggered: Checking for market close square-off (03:10 PM)...');
         const today = new Date();
         const isNiftyExpiry = isExpiryDayForSymbol('NIFTY', today);
         const isSensexExpiry = isExpiryDayForSymbol('SENSEX', today);
@@ -141,14 +141,14 @@ const bootstrap = async () => {
           if (isNiftyExpiry) {
             const positions = positionStores.NIFTY.getPositions();
             if (positions.active) {
-              await exitAllPositions('NIFTY', 'Market close square-off (03:27 PM)');
+              await exitAllPositions('NIFTY', 'Market close square-off (03:10 PM)');
             }
           }
 
           if (isSensexExpiry) {
             const positions = positionStores.SENSEX.getPositions();
             if (positions.active) {
-              await exitAllPositions('SENSEX', 'Market close square-off (03:27 PM)');
+              await exitAllPositions('SENSEX', 'Market close square-off (03:10 PM)');
             }
           }
         } else {
