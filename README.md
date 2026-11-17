@@ -19,7 +19,17 @@ Immediately after entry, execute:
 * Retreive utilized margin block from Angel One.
 * Set Stop-Loss at **1% of entry margin**.
 * Stream option prices in real-time over the updated Angel One SmartStream WebSocket protocol (`wss://smartapisocket.angelone.in/smart-stream`). If combined loss hits 1% of margin at any point, exit all positions immediately.
-* If SL is not hit, hold and square off at **03:27 PM IST** (market close). To save on brokerage fees, any option leg whose LTP is less than ₹5.0 at square-off is allowed to expire worthless instead of placing a close order.
+* If SL is not hit, hold and square off at **03:10 PM IST** (market close). To save on brokerage fees, any option leg whose LTP is less than ₹5.0 at square-off is allowed to expire worthless instead of placing a close order.
+
+### 4. Fill Verification
+
+SmartAPI returns an order id as soon as the order is queued — acceptance is not a fill. The exchange can reject an order seconds later (insufficient funds, price band, freeze quantity), so every leg is confirmed against the order book before it counts.
+
+* Each order is polled until it reaches a terminal state (`complete`, `rejected`, `cancelled`), for up to 15 seconds.
+* If any leg fails, every leg that already filled is unwound with the opposite market order (three attempts each) and **no position is recorded**. A leg that cannot be closed raises a `MANUAL ACTION REQUIRED` alert.
+* Entry premiums recorded in the ledger are the confirmed average fill prices, falling back to the LTP snapshot only when the broker returns no price.
+
+This prevents a partial structure — for example the ATM longs filling while the margin-heavy shorts are rejected — from being carried as a live ratio spread.
 
 ---
 
