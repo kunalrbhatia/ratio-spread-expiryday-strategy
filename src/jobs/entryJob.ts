@@ -5,7 +5,13 @@ import {
   findClosestPremiumStrike,
   getOptionLtps,
 } from '../helpers/marketData.js';
-import { placeOptionOrder, fetchUtilizedMargin, MarginLeg } from '../helpers/orders.js';
+import {
+  placeOptionOrderVerified,
+  fetchUtilizedMargin,
+  MarginLeg,
+  OrderParams,
+  OrderFill,
+} from '../helpers/orders.js';
 import { positionStores, OptionLeg } from '../store/positionStore.js';
 import { sendAlert } from '../notifier.js';
 import { logger } from '../helpers/logger.js';
@@ -25,6 +31,55 @@ export const executeExpiryStrategyEntry = async (
 
     const config = INDEX_CONFIGS[symbol];
 
+    // Every leg that actually fills is tracked here so a later failure can be
+    // unwound instead of leaving a partial structure in the market. Acceptance
+    // by the API is not a fill: the exchange rejects orders seconds later
+    // (insufficient funds, price band), and on 17-Nov-2026 both short legs were
+    // rejected while the ledger recorded all four as open.
+    const filledLegs: OrderParams[] = [];
+
+    const unwindFilledLegs = async (): Promise<void> => {
+      for (const leg of filledLegs) {
+        const opposite: OrderParams = {
+          ...leg,
+          transactiontype: leg.transactiontype === 'BUY' ? 'SELL' : 'BUY',
+        };
+        let closed = false;
+        for (let attempt = 1; attempt <= 3 && !closed; attempt++) {
+          try {
+            const fill = await placeOptionOrderVerified(opposite);
+            logger.warn(
+              `Unwound ${leg.tradingsymbol}: ${opposite.transactiontype} ${opposite.quantity}` +
+                (fill.averagePrice ? ` @ ${fill.averagePrice}` : ''),
+            );
+            closed = true;
+          } catch (err: any) {
+            logger.error(
+              `Unwind attempt ${attempt}/3 for ${leg.tradingsymbol} failed: ${err.message}`,
+            );
+          }
+        }
+        if (!closed) {
+          await sendAlert(
+            `🚨 <b>MANUAL ACTION REQUIRED</b>\nCould not close ${leg.tradingsymbol} (${leg.quantity}) after the entry aborted — this leg is still open.`,
+          );
+        }
+      }
+      filledLegs.length = 0;
+    };
+
+    const enter = async (params: OrderParams): Promise<OrderFill> => {
+      try {
+        const fill = await placeOptionOrderVerified(params);
+        filledLegs.push(params);
+        return fill;
+      } catch (err) {
+        logger.error(`Entry leg failed: ${(err as Error).message}`);
+        await unwindFilledLegs();
+        throw err;
+      }
+    };
+
     // 1. Get spot and calculate ATM
     const spot = await getSpotLtp(symbol);
     const atmStrike = getATMStrike(spot, config.strikeStep);
@@ -39,25 +94,25 @@ export const executeExpiryStrategyEntry = async (
     const buyQty = config.lotSize;
 
     logger.info(`Placing market orders to buy ${symbol} ATM Call and ATM Put...`);
-    const ceBuyOrderId = await placeOptionOrder({
+    const ceBuyFill = await enter({
       tradingsymbol: atmCE.symbol,
       symboltoken: atmCE.token,
       transactiontype: 'BUY',
       quantity: buyQty,
       exchange: config.optionExchange,
     });
-    logger.info(`${symbol} ATM CE Order ID: ${ceBuyOrderId}`);
+    logger.info(`${symbol} ATM CE filled: ${ceBuyFill.orderId} @ ${ceBuyFill.averagePrice ?? '?'}`);
 
-    const peBuyOrderId = await placeOptionOrder({
+    const peBuyFill = await enter({
       tradingsymbol: atmPE.symbol,
       symboltoken: atmPE.token,
       transactiontype: 'BUY',
       quantity: buyQty,
       exchange: config.optionExchange,
     });
-    logger.info(`${symbol} ATM PE Order ID: ${peBuyOrderId}`);
+    logger.info(`${symbol} ATM PE filled: ${peBuyFill.orderId} @ ${peBuyFill.averagePrice ?? '?'}`);
 
-    // 4. Retrieve execute prices with retries
+    // 4. Retrieve LTPs as a fallback for the actual fill prices
     let fillPrices = new Map<string, number>();
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -73,8 +128,9 @@ export const executeExpiryStrategyEntry = async (
       }
     }
 
-    const pCEBuy = fillPrices.get(atmCE.token);
-    const pPEBuy = fillPrices.get(atmPE.token);
+    // The confirmed fill price is authoritative; the LTP is only a fallback.
+    const pCEBuy = ceBuyFill.averagePrice ?? fillPrices.get(atmCE.token);
+    const pPEBuy = peBuyFill.averagePrice ?? fillPrices.get(atmPE.token);
 
     if (!pCEBuy || !pPEBuy) {
       throw new Error(
@@ -110,23 +166,30 @@ export const executeExpiryStrategyEntry = async (
     const sellQty = config.lotSize * 3;
 
     logger.info(`Placing market orders to sell ${symbol} hedge Call and Put positions...`);
-    const ceSellOrderId = await placeOptionOrder({
+    const ceSellFill = await enter({
       tradingsymbol: sellCE.symbol,
       symboltoken: sellCE.token,
       transactiontype: 'SELL',
       quantity: sellQty,
       exchange: config.optionExchange,
     });
-    logger.info(`${symbol} Hedge CE Order ID: ${ceSellOrderId}`);
+    logger.info(
+      `${symbol} Hedge CE filled: ${ceSellFill.orderId} @ ${ceSellFill.averagePrice ?? '?'}`,
+    );
 
-    const peSellOrderId = await placeOptionOrder({
+    const peSellFill = await enter({
       tradingsymbol: sellPE.symbol,
       symboltoken: sellPE.token,
       transactiontype: 'SELL',
       quantity: sellQty,
       exchange: config.optionExchange,
     });
-    logger.info(`${symbol} Hedge PE Order ID: ${peSellOrderId}`);
+    logger.info(
+      `${symbol} Hedge PE filled: ${peSellFill.orderId} @ ${peSellFill.averagePrice ?? '?'}`,
+    );
+
+    const pCESellActual = ceSellFill.averagePrice ?? pCESell;
+    const pPESellActual = peSellFill.averagePrice ?? pPESell;
 
     // 8. Construct positions state and fetch utilized margin
     const activeLegs: OptionLeg[] = [
@@ -149,7 +212,7 @@ export const executeExpiryStrategyEntry = async (
       {
         symbol: sellCE.symbol,
         token: sellCE.token,
-        entryPremium: pCESell,
+        entryPremium: pCESellActual,
         qty: sellQty,
         type: 'CE',
         direction: 'SELL',
@@ -157,7 +220,7 @@ export const executeExpiryStrategyEntry = async (
       {
         symbol: sellPE.symbol,
         token: sellPE.token,
-        entryPremium: pPESell,
+        entryPremium: pPESellActual,
         qty: sellQty,
         type: 'PE',
         direction: 'SELL',
@@ -194,8 +257,8 @@ export const executeExpiryStrategyEntry = async (
 • PE: ${atmPE.symbol} @ ₹${pPEBuy}
 
 <b>Short Positions (3 Lots):</b>
-• CE: ${sellCE.symbol} @ ₹${pCESell}
-• PE: ${sellPE.symbol} @ ₹${pPESell}
+• CE: ${sellCE.symbol} @ ₹${pCESellActual}
+• PE: ${sellPE.symbol} @ ₹${pPESellActual}
 ---------------------------------
 <b>Utilized Margin:</b> ₹${totalMargin.toLocaleString()}
 <b>Stop Loss (1%):</b> ₹${slAmount.toLocaleString()}
@@ -205,7 +268,9 @@ export const executeExpiryStrategyEntry = async (
     return true;
   } catch (error: any) {
     logger.error(`${symbol} Strategy entry execution failed: ${error.message}`);
-    await sendAlert(`🚨 <b>${symbol} Strategy Entry Failed!</b>\nError: ${error.message}`);
+    await sendAlert(
+      `🚨 <b>${symbol} Strategy Entry Failed!</b>\nError: ${error.message}\nAny leg that had filled was unwound; no position was recorded.`,
+    );
     return false;
   }
 };
